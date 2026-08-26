@@ -400,8 +400,12 @@ struct ModelLegend: View {
 struct PanelView: View {
     @ObservedObject var snap: Snapshot
 
+    // 判定も案内も、依存6本すべてを見る。4本しか見ていなかったので、
+    // ccsendstats だけ入れた人には「見つかりません」バナーとデータカードが
+    // 同時に出ていた。
     var anyCLIFound: Bool {
-        snap.hasCchours || snap.hasCcusage || snap.hasCcflaky || snap.hasCcskillstats
+        snap.hasCchours || snap.hasCcusage || snap.hasCcflaky
+            || snap.hasCcskillstats || snap.hasAttention || snap.hasCcsendstats
     }
 
     var maxPanelHeight: CGFloat {

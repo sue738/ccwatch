@@ -60,6 +60,11 @@ commands; it doesn't touch `~/Applications` or your login items on its own.
 - The only network calls are to `api.anthropic.com` (your own usage data,
   authenticated with your own token) and `status.claude.com` (public status
   page, no auth). No telemetry, no third-party endpoint.
+- **The first run shows a Keychain permission dialog** for the
+  `Claude Code-credentials` item, because ccwatch shells out to
+  `/usr/bin/security` to read the token the `claude` CLI already stored.
+  Choose *Always Allow* — *Allow* means the prompt returns on every refresh.
+  Declining is fine too: you lose the rate-limit card and keep everything else.
 - Never writes to your credentials store, never refreshes your OAuth token —
   if it's expired, ccwatch just says so and waits for you to run `claude`
   again.

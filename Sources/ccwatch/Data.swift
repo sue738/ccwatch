@@ -20,13 +20,28 @@ import AppKit
 /// asking a login shell — the same PATH the user's own terminal would use.
 func findCLI(_ name: String) -> String? {
     let home = NSHomeDirectory()
-    let candidates = [
+    let fm = FileManager.default
+    var candidates = [
         "/opt/homebrew/bin/\(name)",
         "/usr/local/bin/\(name)",
         "\(home)/.local/bin/\(name)",
         "\(home)/.npm-global/bin/\(name)",
+        "\(home)/.volta/bin/\(name)",
+        "\(home)/.bun/bin/\(name)",
     ]
-    for c in candidates where FileManager.default.isExecutableFile(atPath: c) { return c }
+    // nvm / fnm / mise は node のバージョンごとにディレクトリを掘るので、
+    // 固定パスでは当たらない。これらは PATH を .zshrc に書くのが既定で、
+    // 下の `zsh -l` は **.zshrc を読まない**(非対話 login shell)。
+    // つまりこの層が無いと、npm install -g 済みでも全カードが無言で消える。
+    for base in ["\(home)/.nvm/versions/node", "\(home)/.local/share/fnm/node-versions",
+                 "\(home)/.local/share/mise/installs/node"] {
+        guard let vers = try? fm.contentsOfDirectory(atPath: base) else { continue }
+        for v in vers.sorted(by: >) {
+            candidates.append("\(base)/\(v)/bin/\(name)")
+            candidates.append("\(base)/\(v)/installs/bin/\(name)")
+        }
+    }
+    for c in candidates where fm.isExecutableFile(atPath: c) { return c }
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/bin/zsh")
     p.arguments = ["-l", "-c", "command -v \(name) 2>/dev/null"]
@@ -64,7 +79,10 @@ func findCLI(_ name: String) -> String? {
 /// after it exits: waiting until exit to read risks a real deadlock once
 /// output exceeds the ~64KB kernel pipe buffer, since the child then blocks
 /// on write() with nobody draining the other end.
-func runJSON(_ path: String, _ args: [String], timeout: TimeInterval = 60) -> Any? {
+/// 既定は 180 秒。上のコメント自身が「ccskillstats --days 30: 60s+」と
+/// 実測を書いているのに 60 秒で切っていたので、履歴の大きい人ではスキル発火
+/// カードが毎回タイムアウトし、永続的に無言で欠落していた。
+func runJSON(_ path: String, _ args: [String], timeout: TimeInterval = 180) -> Any? {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: path)
     p.arguments = args
@@ -520,7 +538,14 @@ final class Snapshot: ObservableObject {
             var dayInput: [Date: Double] = [:], dayOutput: [Date: Double] = [:]
             let todayKey = isoDay.string(from: Date())
             for day in days {
-                guard let ds = day["date"] as? String, let d = isoDay.date(from: ds),
+                // ccusage は v20 で daily 行の日付キーを date → period に改名した
+                // (書式は同じ yyyy-MM-dd)。片方しか読まないと、全行が
+                // ここで skip されたまま下の代入だけ走り、カードは空になる
+                // どころか「$0 / 0トークン」という**誤った実数**を出す。
+                // 手元は Homebrew の v18(date)、README が入れさせる npm は
+                // v20(period)なので、作者の環境では一生再現しない。
+                guard let ds = (day["date"] as? String) ?? (day["period"] as? String),
+                      let d = isoDay.date(from: ds),
                       let models = day["modelBreakdowns"] as? [[String: Any]] else { continue }
                 let isToday = ds == todayKey
                 for m in models {
@@ -588,7 +613,12 @@ final class Snapshot: ObservableObject {
         p.standardOutput = pipe
         p.standardError = Pipe()
         guard (try? p.run()) != nil else { return nil }
-        let deadline = Date().addingTimeInterval(5)
+        // 初回はキーチェーンのアクセス許可ダイアログが出る。「常に許可」は
+        // パスワード入力を伴うので、5秒だと必ず間に合わず kill され、
+        // 180秒ごとにダイアログが出ては勝手に消える上に「ログイン情報が
+        // 見つかりません」という誤診断が固定表示される。人が操作を終える
+        // だけの猶予を取る(この呼び出しは detached なので UI は止まらない)。
+        let deadline = Date().addingTimeInterval(45)
         while p.isRunning && Date() < deadline { usleep(20_000) }
         if p.isRunning { p.terminate() } else {
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
