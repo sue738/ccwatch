@@ -2,7 +2,8 @@
 //
 // Unlike ccmenubar-app (this author's personal build, which reads cache
 // files a private xbar plugin writes), ccwatch shells out directly to the
-// public companion CLIs (cchours, ccusage, ccflaky, ccskillstats) and to
+// public companion CLIs (cchours, ccusage, ccattention, ccflaky,
+// ccskillstats, ccsendstats) and to
 // Anthropic's own oauth/usage endpoint. Any card whose CLI isn't installed
 // is simply omitted — graceful degradation, same philosophy as the
 // published `ccmenubar` xbar plugin.

@@ -1094,9 +1094,12 @@ struct PanelView: View {
             if !anyCLIFound {
                 Card {
                     SectionLabel(text: "コマンドが見つかりません")
-                    Text("cchours・ccusage・ccflaky・ccskillstats のいずれもPATH上に見つかりませんでした。")
+                    // 依存CLIの一覧はREADMEのinstall行と同じ6本にする。ここが4本
+                    // だったので、バナーに従って入れた人は ccattention と
+                    // ccsendstats のカードが無言で出ないままになっていた。
+                    Text("cchours・ccusage・ccattention・ccflaky・ccskillstats・ccsendstats のいずれもPATH上に見つかりませんでした。")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
-                    Text("npm install -g cchours ccusage ccflaky ccskillstats")
+                    Text("npm install -g cchours ccusage ccattention ccflaky ccskillstats ccsendstats")
                         .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                         .padding(6).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                 }
