@@ -85,6 +85,31 @@ struct Card<Content: View>: View {
     }
 }
 
+/// CLI は見つかっているが、まだ結果が返っていないカード。
+/// 何も描かないと「壊れている」と「集計中」が同じ見た目になる — 重い CLI は
+/// 実測で60秒超かかるので、初回起動では必ずこの状態を通る。高さを実カードに
+/// 寄せて、値が入った瞬間に画面が飛び跳ねないようにする。
+struct LoadingCard: View {
+    let title: String
+    var height: CGFloat = 64
+    var body: some View {
+        Card {
+            SectionLabel(text: title)
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach([0.9, 0.65, 0.8, 0.5], id: \.self) { w in
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.primary.opacity(0.07))
+                        .frame(height: 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .scaleEffect(x: w, y: 1, anchor: .leading)
+                }
+                Text("集計中…").font(.system(size: 10)).foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, minHeight: height, alignment: .topLeading)
+        }
+    }
+}
+
 struct SectionLabel: View {
     let text: String
     var body: some View {
@@ -490,7 +515,10 @@ struct PanelView: View {
 
             Card {
                 SectionLabel(text: "レート制限")
-                if let err = snap.rateLimitError {
+                if snap.pending.contains("rate") && snap.rateLimitError == nil
+                    && snap.fiveHour == nil && snap.sevenDay == nil {
+                    Text("取得中…").font(.system(size: 11)).foregroundStyle(.tertiary)
+                } else if let err = snap.rateLimitError {
                     // status色をテキスト本体の色にすると、警告色のコントラストは
                     // 元々アイコン+通常色ラベルの組み合わせを前提に検証されて
                     // いる(palette.md: 単色では意味を運ばない設計)。文字は
@@ -511,6 +539,9 @@ struct PanelView: View {
                 }
             }
 
+            if snap.pending.contains("cost") && snap.costSeries.isEmpty {
+                LoadingCard(title: "コスト推移", height: 84)
+            }
             if snap.hasCcusage && !snap.costSeries.isEmpty {
                 Card {
                     SectionLabel(text: "コスト推移")
@@ -536,11 +567,14 @@ struct PanelView: View {
                             }
                         }
                     }
-                    .frame(height: 60)
+                    .frame(height: 40)
                     ModelLegend(models: sortedModels(models))
                 }
             }
 
+            if snap.pending.contains("cost") && snap.efficiencySeries.isEmpty {
+                LoadingCard(title: "トークンコスト($/Mtok)")
+            }
             if snap.hasCcusage && !snap.efficiencySeries.isEmpty {
                 Card {
                     // 「トークン効率」は中身($/Mtok、単価)を正しく指していない
@@ -586,6 +620,9 @@ struct PanelView: View {
     @ViewBuilder
     private var activityTab: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if snap.pending.contains("hours") && snap.dailyHours.isEmpty {
+                LoadingCard(title: "稼働時間 / 最長連続稼働", height: 84)
+            }
             if snap.hasCchours && !snap.dailyHours.isEmpty {
                 Card {
                     SectionLabel(text: "稼働時間 / 最長連続稼働")
@@ -700,6 +737,9 @@ struct PanelView: View {
             }
 
             // 配置指示: コンテキスト使用率をアクティビティの上へ。
+            if snap.pending.contains("context") && snap.contextUsageSeries.isEmpty {
+                LoadingCard(title: "コンテキスト使用率(分布)")
+            }
             if snap.hasCcsendstats, !snap.contextUsageSeries.isEmpty {
                 Card {
                     SectionLabel(text: "コンテキスト使用率(分布)")
@@ -753,6 +793,9 @@ struct PanelView: View {
     @ViewBuilder
     private var qualityTab: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if snap.pending.contains("tool") && snap.toolErrorRate == nil {
+                LoadingCard(title: "ツール失敗率", height: 40)
+            }
             if snap.hasCcflaky, let rate = snap.toolErrorRate {
                 Card {
                     SectionLabel(text: "ツール失敗率")
@@ -799,6 +842,9 @@ struct PanelView: View {
                 }
             }
 
+            if snap.pending.contains("skills") && snap.skillsTotal == nil {
+                LoadingCard(title: "スキル発火", height: 64)
+            }
             if snap.hasCcskillstats, let fired = snap.skillsFired, let total = snap.skillsTotal, total > 0 {
                 Card {
                     SectionLabel(text: "スキル発火")
@@ -868,6 +914,9 @@ struct PanelView: View {
             // 1日中打ち続けた日が239発話/1用件になるなど値が信用できなかった
             // ため。用件をセッション単位(閾値なし)に変えて実測CVが1.15→0.56に
             // 下がり、全日で算出できるようになったので出す。
+            if snap.pending.contains("attention") && snap.attentionSeries.isEmpty {
+                LoadingCard(title: "セッションあたり発話数")
+            }
             if snap.hasAttention, !snap.attentionSeries.isEmpty {
                 Card {
                     SectionLabel(text: "セッションあたり発話数")
@@ -905,6 +954,9 @@ struct PanelView: View {
                 }
             }
 
+            if snap.pending.contains("attention") && snap.attentionSeries.isEmpty {
+                LoadingCard(title: "自己訂正率 / 差し戻し")
+            }
             if snap.hasAttention, !snap.attentionSeries.isEmpty {
                 Card {
                     SectionLabel(text: "自己訂正率 / 差し戻し")

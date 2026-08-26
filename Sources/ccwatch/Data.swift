@@ -315,6 +315,11 @@ final class Snapshot: ObservableObject {
     @Published var hasCcusage = false
     @Published var hasCcflaky = false
     @Published var hasCcskillstats = false
+    /// まだ結果が返っていないカードのキー。CLIはあるがデータが空、という
+    /// 状態を「無い」と区別するために持つ。これが無いと、重いCLI(実測で
+    /// 60秒超)が返るまでカードがただ存在しないのと同じ見た目になり、
+    /// 壊れているのか集計中なのかがユーザーに区別できない。
+    @Published var pending: Set<String> = []
     @Published var hasAttention = false
     @Published var hasCcsendstats = false
     @Published var hasCredentials = false
@@ -447,6 +452,15 @@ final class Snapshot: ObservableObject {
         // ccskillstats 60秒+…の合計待ちになり、大きい履歴では数分かかる)。
         // 重いCLI呼び出しはTTLが満ちている時だけ実際に叩く。
         let now = Date()
+        // 既に値が入っているカードは pending にしない — 定期更新のたびに
+        // 中身がスケルトンへ戻ると、画面がちらついて読めなくなる。
+        if now >= nextHours, hasCchours, dailyHours.isEmpty { pending.insert("hours") }
+        if now >= nextCost, hasCcusage, costSeries.isEmpty { pending.insert("cost") }
+        if now >= nextToolStats, hasCcflaky, toolErrorRate == nil { pending.insert("tool") }
+        if now >= nextSkills, hasCcskillstats, skillsTotal == nil { pending.insert("skills") }
+        if now >= nextAttention, hasAttention, attentionSeries.isEmpty { pending.insert("attention") }
+        if now >= nextContextUsage, hasCcsendstats, contextUsageSeries.isEmpty { pending.insert("context") }
+        if now >= nextRateLimit, fiveHour == nil, rateLimitError == nil { pending.insert("rate") }
         async let a: () = now >= nextHours ? refreshHours() : ()
         async let b: () = now >= nextCost ? refreshCost() : ()
         async let c: () = now >= nextRateLimit ? refreshRateLimits() : ()
@@ -483,6 +497,7 @@ final class Snapshot: ObservableObject {
     }
 
     private func refreshHours() async {
+        defer { pending.remove("hours") }
         guard let bin = cchoursPath else { return }
         let since = isoDay.string(from: Date().addingTimeInterval(-29 * 86400))
             .replacingOccurrences(of: "-", with: "")
@@ -522,6 +537,7 @@ final class Snapshot: ObservableObject {
     }
 
     private func refreshCost() async {
+        defer { pending.remove("cost") }
         guard let bin = ccusagePath else { return }
         let since = isoDay.string(from: Date().addingTimeInterval(-29 * 86400))
             .replacingOccurrences(of: "-", with: "")
@@ -640,6 +656,7 @@ final class Snapshot: ObservableObject {
     }
 
     private func refreshRateLimits() async {
+        defer { pending.remove("rate") }
         let token = await Task.detached(priority: .userInitiated) { self.readAccessToken() }.value
         guard let token else {
             hasCredentials = false
@@ -719,6 +736,7 @@ final class Snapshot: ObservableObject {
     }
 
     private func refreshToolStats() async {
+        defer { pending.remove("tool") }
         guard let bin = ccflakyPath else { return }
         // 1本のTask.detachedにまとめたタプルは逐次評価される(refreshHours
         // 参照)。呼び出しごとに別のasync letで実際に並行させる。
@@ -750,6 +768,7 @@ final class Snapshot: ObservableObject {
     }
 
     private func refreshSkills() async {
+        defer { pending.remove("skills") }
         guard let bin = ccskillstatsPath else { return }
         // 同じ誤り(1本のTask.detachedのタプルは逐次評価される)が
         // refreshHours/refreshToolStatsだけ直っていてここに残っていた —
@@ -832,6 +851,7 @@ final class Snapshot: ObservableObject {
     }
 
     private func refreshContextUsage() async {
+        defer { pending.remove("context") }
         guard let bin = ccsendstatsPath else { return }
         let raw = await Task.detached(priority: .userInitiated) {
             runJSON(bin, ["--daily", "--days", "30", "--json"])
@@ -865,9 +885,20 @@ final class Snapshot: ObservableObject {
                 guard let attrs = try? fm.attributesOfItem(atPath: path),
                       let mtime = attrs[.modificationDate] as? Date,
                       let size = attrs[.size] as? Int else { continue }
-                let category = f.hasPrefix("feedback_") ? "feedback"
-                    : f.hasPrefix("project_") ? "project"
-                    : f.hasPrefix("user_") ? "user" : "reference"
+                // 分類の正典は frontmatter の `type:`。ファイル名の接頭辞は
+                // この作者の付け方でしかないので、それだけを見ると他人の
+                // メモリが全部 reference に落ちて内訳が無意味になる。
+                // 接頭辞は type が無いファイル向けのフォールバックに下げる。
+                var category = "reference"
+                if let head = (try? String(contentsOfFile: path, encoding: .utf8))?.prefix(400),
+                   let r = head.range(of: "type:[ \t]*(user|feedback|project|reference)",
+                                      options: .regularExpression) {
+                    category = head[r].split(separator: ":").last.map {
+                        $0.trimmingCharacters(in: .whitespaces)
+                    } ?? "reference"
+                } else if f.hasPrefix("feedback_") { category = "feedback" }
+                else if f.hasPrefix("project_") { category = "project" }
+                else if f.hasPrefix("user_") { category = "user" }
                 out.append((mtime, category, size))
             }
             return out.sorted { $0.0 < $1.0 }
@@ -892,6 +923,7 @@ final class Snapshot: ObservableObject {
     }
 
     private func refreshAttention() async {
+        defer { pending.remove("attention") }
         guard let bin = attentionPath else { return }
         let raw = await Task.detached(priority: .userInitiated) {
             runJSON(bin, ["--json", "--days", "30"])
