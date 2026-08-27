@@ -5,6 +5,14 @@
 ccwatch shells out directly to the CLIs it depends on and to Anthropic's own
 usage endpoint. Nothing runs in the background except ccwatch itself.
 
+<img src="docs/menubar.png" alt="ccwatch in the menu bar" height="24">
+
+The menu bar carries the numbers you check without stopping; clicking opens the
+panel below. Both are rendered from the app itself — the panel image comes from
+`ccwatch --render-preview <path>`, so it is the real layout, not a mockup.
+
+<img src="docs/panel.png" alt="the ccwatch panel" width="660">
+
 ## What it shows
 
 See [METRICS.md](METRICS.md) for exactly how each card's number is calculated
