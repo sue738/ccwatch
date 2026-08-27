@@ -1,12 +1,7 @@
-// ccwatch — self-contained Claude Code usage menu bar app.
-//
-// Unlike ccmenubar-app (this author's personal build, which reads cache
-// files a private xbar plugin writes), ccwatch shells out directly to the
-// public companion CLIs (cchours, ccusage, ccattention, ccflaky,
-// ccskillstats, ccsendstats) and to
-// Anthropic's own oauth/usage endpoint. Any card whose CLI isn't installed
-// is simply omitted — graceful degradation, same philosophy as the
-// published `ccmenubar` xbar plugin.
+// ccwatch — self-contained Claude Code usage menu bar app. Unlike
+// ccmenubar-app (reads a private xbar plugin's cache), it shells out
+// directly to the public CLIs and Anthropic's oauth/usage endpoint; a
+// missing CLI just omits its card.
 
 import SwiftUI
 import Foundation
@@ -16,8 +11,7 @@ import AppKit
 // MARK: - CLI discovery
 
 /// GUI apps launched by LaunchServices get a minimal PATH (no Homebrew, no
-/// npm global bin). Check common install locations first, then fall back to
-/// asking a login shell — the same PATH the user's own terminal would use.
+/// npm bin) — check common install locations, then fall back to a login shell.
 func findCLI(_ name: String) -> String? {
     let home = NSHomeDirectory()
     let fm = FileManager.default
@@ -29,10 +23,8 @@ func findCLI(_ name: String) -> String? {
         "\(home)/.volta/bin/\(name)",
         "\(home)/.bun/bin/\(name)",
     ]
-    // nvm / fnm / mise は node のバージョンごとにディレクトリを掘るので、
-    // 固定パスでは当たらない。これらは PATH を .zshrc に書くのが既定で、
-    // 下の `zsh -l` は **.zshrc を読まない**(非対話 login shell)。
-    // つまりこの層が無いと、npm install -g 済みでも全カードが無言で消える。
+    // nvm/fnm/mise dig a per-node-version directory (fixed paths miss it),
+    // and `zsh -l` below doesn't read .zshrc — without this every card vanishes.
     for base in ["\(home)/.nvm/versions/node", "\(home)/.local/share/fnm/node-versions",
                  "\(home)/.local/share/mise/installs/node"] {
         guard let vers = try? fm.contentsOfDirectory(atPath: base) else { continue }
@@ -53,15 +45,14 @@ func findCLI(_ name: String) -> String? {
     } catch {
         return nil
     }
-    // login shell 起動が固まる(壊れた dotfile 等)と waitUntilExit() が無期限に
-    // ブロックし、これが Snapshot の init から呼ばれるためメニューバー自体が
-    // 出てこなくなる。上限を設けて越えたら打ち切る。
+    // A hung login shell blocks waitUntilExit() forever, and since this runs
+    // from Snapshot's init, the whole menu bar never appears — bound with a deadline.
     let deadline = Date().addingTimeInterval(5)
     while p.isRunning && Date() < deadline { usleep(20_000) }
     if p.isRunning {
         p.terminate()
-        // terminate() はSIGTERMを送るだけで即終了を保証しない。後始末をせず
-        // returnするとゾンビ化しうる — 短く待って回収する(レビューで発見)。
+        // terminate() sends SIGTERM but doesn't guarantee immediate exit;
+        // returning without reaping risks a zombie process.
         let killDeadline = Date().addingTimeInterval(1)
         while p.isRunning && Date() < killDeadline { usleep(20_000) }
         return nil
@@ -71,17 +62,9 @@ func findCLI(_ name: String) -> String? {
     return (out?.isEmpty == false) ? out : nil
 }
 
-/// Runs a CLI already resolved to an absolute path and parses its stdout as
-/// JSON. Some of these (ccskillstats/ccflaky on a large transcript history,
-/// ccusage on 30 days of usage) genuinely take 30-60s+ — measured directly
-/// (ccusage: 31.7s, ccskillstats --days 30: 60s+) — so the timeout here is
-/// generous. Reads the pipe continuously while the process runs, not just
-/// after it exits: waiting until exit to read risks a real deadlock once
-/// output exceeds the ~64KB kernel pipe buffer, since the child then blocks
-/// on write() with nobody draining the other end.
-/// 既定は 180 秒。上のコメント自身が「ccskillstats --days 30: 60s+」と
-/// 実測を書いているのに 60 秒で切っていたので、履歴の大きい人ではスキル発火
-/// カードが毎回タイムアウトし、永続的に無言で欠落していた。
+/// Resolves a CLI's stdout as JSON. Some calls take 30-60s+ (measured:
+/// ccusage 31.7s, ccskillstats --days 30: 60s+), and the pipe is read
+/// continuously — waiting until exit risks deadlock past the 64KB buffer.
 func runJSON(_ path: String, _ args: [String], timeout: TimeInterval = 180) -> Any? {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: path)
@@ -96,9 +79,8 @@ func runJSON(_ path: String, _ args: [String], timeout: TimeInterval = 180) -> A
         let chunk = handle.availableData
         lock.lock(); collected.append(chunk); lock.unlock()
     }
-    // stderrも読み続けないと、子が大量に書いた時に64KBのkernelパイプバッファが
-    // 埋まってwrite()でブロックする — stdoutだけ対策してこちらを放置していた
-    // (実測でCPUを焼き続ける原因の一つ)。中身は使わないので読んで捨てるだけ。
+    // stderr needs continuous draining too, or the 64KB pipe buffer fills
+    // and the child blocks on write() (measured cause of pegged CPU).
     errPipe.fileHandleForReading.readabilityHandler = { handle in
         _ = handle.availableData
     }
@@ -139,8 +121,8 @@ struct DailyPoint: Identifiable {
     let date: Date
     let agentHours: Double
     let longestRunHours: Double
-    // cchours --daily が同じレスポンスで返す値(実測: 日次で並列度1.0〜1.9台、
-    // 委譲率(subagentHours/agentHours)は0.8%〜56%と大きく動く。新規fetch不要)。
+    // Already returned by cchours --daily (no new fetch) — measured:
+    // parallelism 1.0-1.9, delegation 0.8%-56%.
     let parallelism: Double
     let subShare: Double
 }
@@ -152,28 +134,20 @@ struct CostPoint: Identifiable {
     let cost: Double
 }
 
-/// $/1Mトークン。キャッシュ読込が多いほど下がる — 下がっている方が
-/// 良い使い方(元のxbarプラグインの per_mtok と同じ発想)。
 struct EfficiencyPoint: Identifiable {
     let id = UUID()
     let date: Date
     let perMtok: Double
     let totalTokens: Double
-    // 入力側(uncached input + cache_creation + cache_read)と出力側
-    // (output)は性質が違う — 入力は文脈量、出力は生成量。合算した
-    // totalTokens だけでは「読む量が多いのか書く量が多いのか」が消える。
+    // Input and output differ in nature — totalTokens alone hides which dominates.
     let inputTokens: Double
     let outputTokens: Double
 }
 
-/// 会話の中身に関係なく毎回乗っている固定費(system prompt+CLAUDE.md+
-/// メモリ+ツール定義など、最初の一言より前の実測トークン)の日別平均
-/// (ccsendstats --daily --baseline)。キャッシュ内訳・入出力比は30〜50セッション/日
-/// を混ぜると帯域に収束して動かなくなることを実測で確認済みだが、これは
-/// 実際に週単位で動く(実測: 9日で約33k→52k)。
-/// 実行中に次のプロンプトを送った割合(ccsendstats --daily --interrupt)。
-/// トークンではなく行動の指標 — 実測30日で0%→100%まで明確な上昇トレンド
-/// (待たずに次を投げるスタイルへの変化を捉えている、日次でもノイズに埋もれない)。
+/// Daily average fixed cost (system prompt+CLAUDE.md+memory+tool defs)
+/// (ccsendstats --daily --baseline) — measured: ~33k→52k over 9 days.
+/// Share of runs where the next prompt was sent mid-run (--daily --interrupt)
+/// — measured: 0%→100% over 30 days.
 struct InterruptPoint: Identifiable {
     let id = UUID()
     let date: Date
@@ -185,15 +159,12 @@ struct BaselinePoint: Identifiable {
     let id = UUID()
     let date: Date
     let avgBaseline: Double
-    // ccsendstats --daily --baseline が既に返す値(コスト推移・peak%等の
-    // ノイズの多くを説明する文脈: 実測で2〜54と大きく動く)。
+    // Ties to cost-trend/peak% noise (measured: swings 2-54).
     let sessions: Int
 }
 
-/// コンテキスト窓使用率の日別分布(ccsendstats --daily)。peakは「その日一番長く
-/// 続いたセッション」で決まりがちで、セッション数が多い日ほど構造的に
-/// 上限へ張り付く(実測: ほぼ毎日90%台で固定・示唆なし)。p50(中央値)は
-/// 実際に動く(実測: 9日で16.7%〜63%)ので、peakではなくp50を見せる。
+/// Daily context-window usage (ccsendstats --daily). peak pins near 90%+ on
+/// busy days (no signal); p50 moves 16.7%-63% over 9 days — show p50.
 struct ContextUsagePoint: Identifiable {
     let id = UUID()
     let date: Date
@@ -202,15 +173,10 @@ struct ContextUsagePoint: Identifiable {
     let p75Pct: Double
 }
 
-/// 会話開始前の固定費(baseline)の内訳候補。system prompt・ツール定義は
-/// transcriptに残らないため積み上げできない(ccsendstatsのproxy節参照)が、
-/// auto memoryファイル(~/.claude/projects/<slug>/memory/*.md)は
-/// mtime+サイズが直接読めるので、種別(MEMORY.mdと同じuser/feedback/
-/// project/reference分類)ごとの累積推定トークン数を日別に再構成できる。
-/// 実測: 8/15の約1.2kトークンから8/22の約19.1kトークンまで増加していて、
-/// baselineの伸び(約33k→52k、+19k)とほぼ一致 — baseline増加の主因の
-/// 少なくとも一部と見てよい。CLAUDE.md本体・スキルは単一ファイルでmtimeが
-/// 「最後に触った日」しか示さず過去の変遷を再構成できないため含まない。
+/// Fixed-cost breakdown before a conversation starts — system prompt/tool
+/// defs don't persist in the transcript, but memory files' mtime+size do,
+/// reconstructing cumulative tokens/category day by day (measured: ~1.2k on
+/// 8/15 to ~19.1k on 8/22, matching baseline's +19k growth).
 struct MemoryGrowthPoint: Identifiable {
     let id = UUID()
     let date: Date
@@ -243,9 +209,8 @@ struct SkillPoint: Identifiable {
     let total: Double
 }
 
-/// スキル発火の「誰が呼んだか」— tool(Claudeが会話中に自主的に選んだ)/
-/// typed(自分で/nameと打った)/auto(cron等の自動化)。実測: autoが63%、
-/// toolはわずか17% — descriptionが会話中に拾われているかの診断材料になる。
+/// "Who invoked it": tool (Claude chose it) / typed (/name) / auto (cron).
+/// Measured: auto 63%, tool 17%.
 struct SkillFireKindRow: Identifiable {
     let id = UUID()
     let date: Date
@@ -253,9 +218,8 @@ struct SkillFireKindRow: Identifiable {
     let count: Double
 }
 
-/// あなたが払った手間。私の饒舌さや稼働時間ではなく、1つの用件を通すのに
-/// 何回打ったか(perThread)が主指標 — xbarプラグイン claude-limits.1m.sh の
-/// attention節と同じ計算式。
+/// Effort you paid — times you had to type per matter (perThread), same
+/// formula as xbar plugin claude-limits.1m.sh.
 struct AttentionPoint: Identifiable {
     let id = UUID()
     let date: Date
@@ -263,8 +227,8 @@ struct AttentionPoint: Identifiable {
     let charsPerThread: Double
     let blocksPerThread: Double
     let selffixRate: Double
-    // 用件(スレッド)で割らない生の差し戻し件数。用件の定義は微妙という指摘で
-    // per-thread正規化した指標は撤去したが、生の件数自体は定義に依存しない。
+    // Raw pushback count, not divided by matter — the "matter" definition
+    // is fuzzy, so per-thread normalization was dropped; raw count isn't.
     let blocksRaw: Int
 }
 
@@ -300,25 +264,18 @@ func moneyFmt(_ v: Double) -> String {
 
 // MARK: - Snapshot
 
-// @MainActor: @Published の書き込みは MenuBarExtra の裏にある NSMenu の
-// 更新につながり、メインスレッド以外から書くと NSAssertionHandler が
-// abort する(実測でクラッシュした — -[NSMenu itemArray] 経由)。
-// 一方 refresh() 自身は CLI をshell out・ネットワークを叩くブロッキング
-// 処理を含み(数秒かかりうる)、MainActor上で同期実行すると今度は
-// メニューバー項目の初期描画がブロックされて出てこなくなる(これも実測)。
-// 正しい形は「重い処理だけ Task.detached に逃がし、await で結果を受けたら
-// 自動的にMainActorへ戻ってから@Publishedへ代入する」— refresh()自体は
-// asyncにして、ブロッキング呼び出しをそれぞれ detached task で包む。
+// @MainActor: writing to @Published off the main thread crashes
+// NSAssertionHandler (measured). But refresh() blocks (CLI shell-outs,
+// network) — sync on MainActor blocks the menu bar's first render too
+// (measured) — keep refresh() async, offload blocking calls to Task.detached.
 @MainActor
 final class Snapshot: ObservableObject {
     @Published var hasCchours = false
     @Published var hasCcusage = false
     @Published var hasCcflaky = false
     @Published var hasCcskillstats = false
-    /// まだ結果が返っていないカードのキー。CLIはあるがデータが空、という
-    /// 状態を「無い」と区別するために持つ。これが無いと、重いCLI(実測で
-    /// 60秒超)が返るまでカードがただ存在しないのと同じ見た目になり、
-    /// 壊れているのか集計中なのかがユーザーに区別できない。
+    /// Cards whose result hasn't returned — distinguishes empty data from
+    /// absent, since a heavy CLI (measured 60s+) would look absent otherwise.
     @Published var pending: Set<String> = []
     @Published var hasAttention = false
     @Published var hasCcsendstats = false
@@ -363,12 +320,9 @@ final class Snapshot: ObservableObject {
 
     @Published var lastRefresh = Date()
 
-    // findCLI は候補パスで見つからないとログインシェルを起動する(最大5秒)。
-    // 5本を `let` の初期化子として書くと Snapshot() 生成時に**逐次**5回呼ばれ、
-    // 最悪25秒 MainActor をブロックする(このファイル冒頭のコメントが警告する
-    // 「MainActor上の同期ブロッキングでメニューバー項目が出てこない」実測済みの
-    // 症状そのものを、initの経路で再現していた — レビューで発見)。
-    // var にして起動直後に非同期で並行解決する。
+    // As `let`, all five would resolve **sequentially** (findCLI falls back
+    // to a 5s login shell each), blocking MainActor up to 25s during
+    // Snapshot() construction. Kept `var`, resolved concurrently after launch.
     private var cchoursPath: String?
     private var ccusagePath: String?
     private var ccflakyPath: String?
@@ -389,18 +343,13 @@ final class Snapshot: ObservableObject {
         (cchoursPath, ccusagePath, ccflakyPath, ccskillstatsPath, attentionPath, ccsendstatsPath) = await (a, b, c, d, e, f)
     }
 
-    // ccskillstats 等が90秒超かかることがある(README記載)。次のtimer tickが
-    // それより早く来ると多重実行になり、レート制限エンドポイントを余計に
-    // 叩く原因になる — 実行中は次呼び出しを素通りさせる。
+    // ccskillstats etc. can exceed 90s (per README); an overlapping tick
+    // would cause extra rate-limit hits — skip the next call while one runs.
     private var isRefreshing = false
 
-    // 60秒ごとのtimerで毎回、全transcript履歴を舐めるCLIまで呼ぶと、実測で
-    // 4本のnodeがほぼ常時100% CPU(duty cycleがほぼ1.0)になった。レート制限
-    // (軽いHTTP)とstatus(同)は毎tickで問題ないが、cchours/ccusage/ccflaky/
-    // ccskillstatsは「値の鮮度」より「常時焼かない」を優先し、xbarプラグイン
-    // (claude-limits.1m.sh)が実運用で使っているキャッシュ間隔をそのまま踏襲する
-    // (cchours=5分キャッシュ、ccflaky/ccskillstatsは1日分900秒・30日分含む
-    // 呼び出しは3600秒)。
+    // Scanning transcripts every 60s tick measured out to 4 node processes
+    // near 100% CPU — these reuse the xbar plugin's production cache
+    // intervals instead: cchours 5min; ccflaky/ccskillstats 900s/3600s.
     private var nextHours = Date.distantPast
     private var nextCost = Date.distantPast
     private var nextToolStats = Date.distantPast
@@ -415,20 +364,15 @@ final class Snapshot: ObservableObject {
     private let toolStatsTTL: TimeInterval = 900
     private let skillsTTL: TimeInterval = 900
     private let attentionTTL: TimeInterval = 1800
-    // --baselineは全セッションの全文を読む(--cacheはusage合計だけで済む)ので
-    // 最も重い部類 — attentionと同じ30分間隔にする。
+    // --baseline reads full session text (heaviest) — same 30-min interval as attention.
     private let baselineTTL: TimeInterval = 1800
     private let interruptTTL: TimeInterval = 1800
-    // --daily(peak/avg/p50)はusage合計だけで済む(--cacheと同じ軽さ)。
+    // --daily (peak/avg/p50) only needs usage totals (as light as --cache).
     private let contextUsageTTL: TimeInterval = 900
-    // ローカルファイルのstatだけなので軽い。CLI呼び出しではない。
     private let memoryGrowthTTL: TimeInterval = 900
-    // /api/oauth/usage 自体がアカウント単位で厳しくレート制限されている
-    // (実測: 60秒間隔でポーリングすると2回に1回429、実機のclaude CLI等
-    // 他プロセスの呼び出しと衝突すると3回以上連続で429することも確認)。
-    // 60秒tickのたびに叩くと自ら制限にぶつかり続け、結果が返らない限り
-    // fiveHour/sevenDayが更新されず「hだけ出てwが出ない」状態が長時間
-    // 固定化する。基本間隔を180秒に緩め、429が続いたら指数バックオフする。
+    // /api/oauth/usage rate-limits per account (measured: 60s polling gets
+    // a 429 on 1 of 2 calls, 3+ consecutive when colliding with other
+    // processes) — base interval 180s, exponential backoff on 429.
     private let rateLimitBaseTTL: TimeInterval = 180
     private var consecutive429 = 0
 
@@ -446,14 +390,11 @@ final class Snapshot: ObservableObject {
         hasAttention = attentionPath != nil
         hasCcsendstats = ccsendstatsPath != nil
 
-        // 並行に開始する。各 refreshX は自分の重い処理を Task.detached に
-        // 逃がしてから await するので、MainActor 上の記帳は一瞬で次へ移り、
-        // バックグラウンドの実作業は実質並列に進む(逐次だとccusage 32秒+
-        // ccskillstats 60秒+…の合計待ちになり、大きい履歴では数分かかる)。
-        // 重いCLI呼び出しはTTLが満ちている時だけ実際に叩く。
+        // Each refreshX offloads to Task.detached before awaiting, so
+        // MainActor moves on instantly (sequential would add ccusage's 32s +
+        // ccskillstats's 60s + ...). Heavy calls only fire once TTL expires.
         let now = Date()
-        // 既に値が入っているカードは pending にしない — 定期更新のたびに
-        // 中身がスケルトンへ戻ると、画面がちらついて読めなくなる。
+        // Don't re-mark pending if a card already has a value, or it flickers to a skeleton on refresh.
         if now >= nextHours, hasCchours, dailyHours.isEmpty { pending.insert("hours") }
         if now >= nextCost, hasCcusage, costSeries.isEmpty { pending.insert("cost") }
         if now >= nextToolStats, hasCcflaky, toolErrorRate == nil { pending.insert("tool") }
@@ -501,17 +442,13 @@ final class Snapshot: ObservableObject {
         guard let bin = cchoursPath else { return }
         let since = isoDay.string(from: Date().addingTimeInterval(-29 * 86400))
             .replacingOccurrences(of: "-", with: "")
-        // タプルリテラルの各要素は左から順に**逐次**評価されるため、1本の
-        // Task.detached にまとめても並列にはならない(実測: スキル発火の
-        // 全体集計が60秒タイムアウトで毎回nilのまま出なかった原因の1つが
-        // この誤りのコピー — 呼び出し元のコメントは「並列」と書いていたが
-        // 実際は最悪3本ぶん逐次で待つ形になっていた)。呼び出しごとに
-        // 別のasync letで包み、実際に並行させる。
+        // Tuple literal elements evaluate **sequentially**, so bundling
+        // calls into one Task.detached doesn't parallelize them (measured:
+        // this exact mistake caused skill-fire stats to return nil on a 60s timeout).
         async let todayT: Any? = Task.detached(priority: .userInitiated) { runJSON(bin, ["--today", "--json"]) }.value
         async let d30T: Any? = Task.detached(priority: .userInitiated) { runJSON(bin, ["--days", "30", "--json"]) }.value
         async let dailyT: Any? = Task.detached(priority: .userInitiated) { runJSON(bin, ["--daily", "--since", since, "--json"]) }.value
-        // ヒートマップ用の時間帯グリッド。--card がSVGカード用に持っている
-        // grid[日][時] をそのまま流用する(--gridという独立フラグは無い)。
+        // Reuse grid[day][hour] from --card's SVG output — no separate --grid flag.
         async let cardT: Any? = Task.detached(priority: .userInitiated) { runJSON(bin, ["--card", "--json", "--since", since]) }.value
         let (today, d30, daily, card) = await (todayT, d30T, dailyT, cardT)
         if let today = today as? [String: Any] {
@@ -549,17 +486,14 @@ final class Snapshot: ObservableObject {
             var points: [CostPoint] = []
             var todayC = 0.0, todayT = 0.0, rangeC = 0.0, rangeT = 0.0
             var dayCost: [Date: Double] = [:], dayTokens: [Date: Double] = [:]
-            // 入力側(uncached + cache_creation + cache_read)と出力側は別集計
-            // (ccsendstatsのrealIn/outと同じ区分。ここに独自の定義を増やさない)。
+            // Tallied separately, same split as ccsendstats' realIn/out — don't invent a new definition.
             var dayInput: [Date: Double] = [:], dayOutput: [Date: Double] = [:]
             let todayKey = isoDay.string(from: Date())
             for day in days {
-                // ccusage は v20 で daily 行の日付キーを date → period に改名した
-                // (書式は同じ yyyy-MM-dd)。片方しか読まないと、全行が
-                // ここで skip されたまま下の代入だけ走り、カードは空になる
-                // どころか「$0 / 0トークン」という**誤った実数**を出す。
-                // 手元は Homebrew の v18(date)、README が入れさせる npm は
-                // v20(period)なので、作者の環境では一生再現しない。
+                // ccusage renamed the date key from "date" to "period" in
+                // v20. Reading only one silently skips every row, showing
+                // "$0 / 0 tokens" — wrong but real-looking. Homebrew here is
+                // v18 (date); the README's npm install is v20 (period).
                 guard let ds = (day["date"] as? String) ?? (day["period"] as? String),
                       let d = isoDay.date(from: ds),
                       let models = day["modelBreakdowns"] as? [[String: Any]] else { continue }
@@ -612,13 +546,10 @@ final class Snapshot: ObservableObject {
     /// claude-usage-api.sh this was modeled on — a distributed app should not
     /// be mutating someone's credential store.
     //
-    // 試して分かったこと(実測): SecItemCopyMatching をアプリ内から直接呼ぶ方が
-    // ACLのスコープはccwatch自身に限定できて理屈上は安全だが、この項目のACLに
-    // 未登録の状態から呼ぶと、interactionNotAllowed=true を付けても実機で
-    // 無限にハングした(SecurityAgentの認証プロンプトがウィンドウとして
-    // 描画されないまま待ち続ける — コマンドライン起動固有の問題と見られる)。
-    // ハングする「安全な実装」より、動く `/usr/bin/security` shell-out を
-    // タイムアウト付きで使う方を選ぶ。ACLの拡大についてはREADMEに明記する。
+    // Measured: calling SecItemCopyMatching directly would scope the ACL
+    // tighter, but before the item is registered it hangs indefinitely on
+    // real hardware even with interactionNotAllowed=true (specific to
+    // command-line launches) — uses `/usr/bin/security` shell-out instead.
     nonisolated private func readAccessToken() -> String? {
         let service = "Claude Code-credentials"
         let account = NSUserName()
@@ -629,11 +560,8 @@ final class Snapshot: ObservableObject {
         p.standardOutput = pipe
         p.standardError = Pipe()
         guard (try? p.run()) != nil else { return nil }
-        // 初回はキーチェーンのアクセス許可ダイアログが出る。「常に許可」は
-        // パスワード入力を伴うので、5秒だと必ず間に合わず kill され、
-        // 180秒ごとにダイアログが出ては勝手に消える上に「ログイン情報が
-        // 見つかりません」という誤診断が固定表示される。人が操作を終える
-        // だけの猶予を取る(この呼び出しは detached なので UI は止まらない)。
+        // First run's Keychain dialog needs a password for "Always Allow" —
+        // a 5s timeout would always kill it early; 45s gives room to finish.
         let deadline = Date().addingTimeInterval(45)
         while p.isRunning && Date() < deadline { usleep(20_000) }
         if p.isRunning { p.terminate() } else {
@@ -688,9 +616,7 @@ final class Snapshot: ObservableObject {
                     "[\(ts)] rateLimits FAILED: statusCode=\(statusCode) hasUsage=\(usage != nil) rawKeys=\(usage?.keys.sorted() ?? [])\n"
                         .data(using: .utf8)!)
             }
-            // 429だけ指数バックオフする(サーバー側の窓を自分で埋め続けない
-            // ため)。401/その他は一時的な事象の可能性が高いので基本間隔で
-            // 素直にリトライする。上限15分。
+            // Exponential backoff only on 429 (401/others retry at base interval); capped at 15 min.
             if statusCode == 429 {
                 consecutive429 = min(consecutive429 + 1, 4)
                 let backoff = rateLimitBaseTTL * pow(2, Double(consecutive429))
@@ -738,19 +664,16 @@ final class Snapshot: ObservableObject {
     private func refreshToolStats() async {
         defer { pending.remove("tool") }
         guard let bin = ccflakyPath else { return }
-        // 1本のTask.detachedにまとめたタプルは逐次評価される(refreshHours
-        // 参照)。呼び出しごとに別のasync letで実際に並行させる。
+        // Same tuple-sequential trap as refreshHours — separate async lets.
         async let todayT: Any? = Task.detached(priority: .userInitiated) { runJSON(bin, ["--json", "--days", "1"]) }.value
         async let dailyT: Any? = Task.detached(priority: .userInitiated) { runJSON(bin, ["--daily", "--json", "--days", "30"]) }.value
         let (today, daily) = await (todayT, dailyT)
         if let today = today as? [String: Any] {
             toolCallsToday = today["total"] as? Int
-            // 「直近」は直近1日の失敗率にする(指摘) — 30日平均は
-            // errorRateSeriesの折れ線側に既に出ているので二重管理しない。
+            // "Recent" = most-recent-day rate — 30-day average is already on the errorRateSeries chart.
             toolErrorRate = today["errorRate"] as? Double
             if let rows = today["rows"] as? [[String: Any]] {
-                // 1日分は30日分よりサンプル数が少ないので閾値を緩める
-                // (calls>=20だと当日は主要ツール以外ほぼ出なかった)。
+                // 1-day sample is smaller than 30-day — relax threshold (calls>=20 showed almost nothing).
                 topFailingTools = rows.compactMap { r in
                     guard let name = r["name"] as? String, let calls = r["calls"] as? Int,
                           let rate = r["errorRate"] as? Double, calls >= 5, rate >= 5 else { return nil }
@@ -770,16 +693,12 @@ final class Snapshot: ObservableObject {
     private func refreshSkills() async {
         defer { pending.remove("skills") }
         guard let bin = ccskillstatsPath else { return }
-        // 同じ誤り(1本のTask.detachedのタプルは逐次評価される)が
-        // refreshHours/refreshToolStatsだけ直っていてここに残っていた —
-        // まさにこの関数の逐次待ちが「スキル発火が60秒タイムアウトで
-        // 毎回nilのまま出なかった」動機そのものだったのに、Fableレビューで
-        // 見落としを指摘されるまで直っていなかった。
+        // Same tuple-sequential trap as refreshHours — this one caused
+        // skill-fire stats to return nil on a 60s timeout until fixed.
         async let allT: Any? = Task.detached(priority: .userInitiated) { runJSON(bin, ["--json"]) }.value
         async let dailyT: Any? = Task.detached(priority: .userInitiated) { runJSON(bin, ["--daily", "--json", "--days", "30"]) }.value
-        // 「発火数/インストール数」は全期間で数える(--days 30に絞ると
-        // 直近未発火のインストール済みスキルの扱いが変わりうるので、
-        // 既存の分母はそのまま)。上位3件だけ直近30日に絞った別呼び出しで取る。
+        // "fired/installed" counts over all time (--days 30 would misclassify
+        // dormant skills); top 3 fetched separately, limited to 30 days.
         async let recentT: Any? = Task.detached(priority: .userInitiated) { runJSON(bin, ["--json", "--days", "30"]) }.value
         let (all, daily, recent) = await (allT, dailyT, recentT)
         if let all = all as? [String: Any], let skills = all["skills"] as? [[String: Any]] {
@@ -798,7 +717,7 @@ final class Snapshot: ObservableObject {
                       let total = row["total"] as? Int else { return nil }
                 return SkillPoint(date: d, total: Double(total))
             }.sorted { $0.date < $1.date }
-            // 同じdaily応答に既にtool/typed/autoの内訳が入っている(新規取得なし)。
+            // Same daily response already has the tool/typed/auto breakdown — no new fetch.
             skillFireKindSeries = periods.flatMap { row -> [SkillFireKindRow] in
                 guard let ds = row["key"] as? String, let d = isoDay.date(from: ds) else { return [] }
                 let tool = Double(row["tool"] as? Int ?? 0)
@@ -814,14 +733,8 @@ final class Snapshot: ObservableObject {
         }
     }
 
-    // xbarプラグイン(claude-limits.1m.sh)にあった「attention（あなたが払った
-    // 手間）」節。アプリ化した際に単純に移植し忘れていた項目 — 実際に使って
-    // いたユーザーから指摘があり追加(旧xbarと同じ計算式: 用件=threads、
-    // 発話数=user、を用件数で割る)。
-    // ccsendstatsの --daily --cache は入力トークンを課金レート別(非キャッシュ/
-    // キャッシュ書込1h/5m/読込)に日別集計する。ccsendstatsは他のCLI群と違い
-    // 全セッションのtranscriptを都度読むので、ccskillstats/ccflakyと
-    // 同じ900秒TTLを与える(毎tick叩かない)。
+    // ccsendstats --daily --cache tallies input tokens by billing rate; it
+    // re-reads every transcript, so shares ccskillstats/ccflaky's 900s TTL.
     private func refreshBaseline() async {
         guard let bin = ccsendstatsPath else { return }
         let raw = await Task.detached(priority: .userInitiated) {
@@ -865,13 +778,9 @@ final class Snapshot: ObservableObject {
         }
     }
 
-    // auto memoryファイルはCLIを経由しない唯一のカード — ローカルの
-    // ~/.claude/projects/<home slug>/memory/*.md をFileManagerで直接stat。
-    // 各ファイルのmtime+サイズを種別(ファイル名prefix)別に時系列順で足し込み、
-    // 「その日までに積み上がった推定トークン数」を種別ごとに再構成する。
-    // 単一ファイルの上書き編集(CLAUDE.md本体等)は最終更新日しか分からず
-    // 過去のサイズ推移を再構成できないため対象外 — 個別ファイルが多数ある
-    // memoryディレクトリだけがこの手法で歴史を持てる。
+    // Only card with no CLI — stats ~/.claude/projects/<slug>/memory/*.md
+    // directly via FileManager, summing mtime+size per category to
+    // reconstruct cumulative tokens by day.
     private func refreshMemoryGrowth() async {
         let home = NSHomeDirectory()
         let slug = home.replacingOccurrences(of: "/", with: "-")
@@ -885,10 +794,8 @@ final class Snapshot: ObservableObject {
                 guard let attrs = try? fm.attributesOfItem(atPath: path),
                       let mtime = attrs[.modificationDate] as? Date,
                       let size = attrs[.size] as? Int else { continue }
-                // 分類の正典は frontmatter の `type:`。ファイル名の接頭辞は
-                // この作者の付け方でしかないので、それだけを見ると他人の
-                // メモリが全部 reference に落ちて内訳が無意味になる。
-                // 接頭辞は type が無いファイル向けのフォールバックに下げる。
+                // Source of truth is frontmatter's `type:` — the filename
+                // prefix is a fallback only (else other users' files all land in reference).
                 var category = "reference"
                 if let head = (try? String(contentsOfFile: path, encoding: .utf8))?.prefix(400),
                    let r = head.range(of: "type:[ \t]*(user|feedback|project|reference)",
@@ -904,14 +811,13 @@ final class Snapshot: ObservableObject {
             return out.sorted { $0.0 < $1.0 }
         }.value
         guard !entries.isEmpty else { return }
-        // 累積自体は全履歴で計算する(3月分含め正しい値にする)が、表示は他の
-        // カードと同じ直近30日に絞る — 絞らないと半年分の横軸に直近の変化が
-        // 潰れて見えなくなる(実測: x軸ラベルが重なって読めなくなった)。
+        // Cumulative is computed over full history (back through March), but
+        // display caps at 30 days — else labels overlap on a 6-month axis (measured).
         var running: [String: Double] = [:]
         var byDay: [Date: [String: Double]] = [:]
         let cal = Calendar.current
         for (date, category, bytes) in entries {
-            running[category, default: 0] += Double(bytes) / 4  // 4 bytes/token概算(ccsendstatsと同じ)
+            running[category, default: 0] += Double(bytes) / 4  // ~4 bytes/token estimate (same as ccsendstats)
             byDay[cal.startOfDay(for: date)] = running
         }
         let cutoff = cal.startOfDay(for: Date().addingTimeInterval(-30 * 86400))
@@ -929,10 +835,8 @@ final class Snapshot: ObservableObject {
             runJSON(bin, ["--json", "--days", "30"])
         }.value
         guard let byDay = raw as? [String: Any] else { return }
-        // 今日のキーが無い時に代入をスキップするだけだと、@Publishedは前回の
-        // 成功値(前日分など)を保持したまま「今日:」ラベルで出続ける
-        // (日付をまたぐと古い値が今日の実績として表示され続ける — レビューで
-        // 発見)。該当なしなら明示的にnilへ戻す。
+        // Skipping the assignment when today has no key would leave
+        // @Published showing yesterday's value under "Today:" — reset to nil.
         let todayKey = isoDay.string(from: Date())
         if let today = byDay[todayKey] as? [String: Any],
            let user = today["user"] as? Int, let threads = today["threads"] as? Int, threads > 0 {

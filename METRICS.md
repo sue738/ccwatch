@@ -1,111 +1,133 @@
-# 各カードの計算ロジック
+# How each card is calculated
 
-ccwatch が表示する指標がどこから来て、どう計算されているかをまとめたもの。
-すべて手元の `~/.claude/projects/**/*.jsonl`(Claude Codeのローカルtranscript)
-または Anthropic 自身の使用量エンドポイントから、ローカルで計算している。
-外部サーバーには一切送らない(各CLIの README の「Security & trust」節を参照)。
+A summary of where each metric ccwatch displays comes from and how it is
+calculated. Everything is computed locally, either from the local
+`~/.claude/projects/**/*.jsonl` files (Claude Code's local transcripts) or
+from Anthropic's own usage endpoint. Nothing is ever sent to an external
+server (see the "Security & trust" section of each CLI's README).
 
-## 稼働時間 / コスト / トークン(サマリー3タイル)
+## Hours / cost / tokens (summary tiles)
 
-- 今日の値: `cchours --today --json` / `ccusage daily --since <today> --json`
-- 30日の値: `cchours --days 30 --json` / `ccusage daily --since <30日前> --json`
+- Today's value: `cchours --today --json` / `ccusage daily --since <today> --json`
+- 30-day value: `cchours --days 30 --json` / `ccusage daily --since <30 days ago> --json`
 
-## レート制限
+## Rate limits
 
-`https://api.anthropic.com/api/oauth/usage` を直接叩く。認証はClaude Code自身が
-Keychainに保存しているOAuthトークンを読むか(フォールバックで
-`~/.claude/.credentials.json`)。5時間枠・週次枠・モデル別週次枠(Fable枠等)の
-使用率と、それぞれのリセット時刻を表示する。
+Calls `https://api.anthropic.com/api/oauth/usage` directly. Authentication
+reads the OAuth token that Claude Code itself stores in the Keychain
+(falling back to `~/.claude/.credentials.json`). Shows usage rates for the
+5-hour window, the weekly window, and per-model weekly windows (e.g. the
+Fable window), along with each window's reset time.
 
-## コスト推移
+## Cost trend
 
-`ccusage daily --since <30日前> --breakdown --json` の日別・モデル別コストを
-そのままモデルごとに積み上げ面グラフにする。
+Takes the per-day, per-model cost from
+`ccusage daily --since <30 days ago> --breakdown --json` and renders it
+directly as a stacked area chart by model.
 
-## 稼働時間 / 最長連続稼働
+## Hours / longest run
 
-`cchours --daily --since <30日前> --json` が日別に返す `agentHours`(その日の
-合計稼働時間)と `longestRunHours`(その日の最長連続稼働時間)。2本のスケールが
-大きく違う(時間 vs 分)ため、右軸を左軸のレンジに正規化して重ねて描画している
-(2軸チャートではなく1軸+右ラベル変換)。
+`agentHours` (that day's total active hours) and `longestRunHours` (that
+day's longest continuous run), both returned per day by
+`cchours --daily --since <30 days ago> --json`. The two scales differ
+greatly (hours vs. minutes), so the right axis is normalized into the left
+axis's range and overlaid (this is one axis with a relabeled right side,
+not a true dual-axis chart).
 
-## 並列度 / 委譲率
+## Parallelism / delegation
 
-同じ `cchours --daily` レスポンスが返す `parallelism`(その日の同時実行倍率の
-平均)と `subagentHours / agentHours`(委譲率、サブエージェントに使った時間の
-割合)。新規のCLI呼び出しは無い。日次で見ると並列度1.0〜1.9倍・委譲率
-0.8%〜56%と実際に大きく動く(45日集計に固めると動かなくなることを確認済み)。
+`parallelism` (that day's average concurrency multiplier) and
+`subagentHours / agentHours` (delegation rate, the share of time spent on
+subagents), both from the same `cchours --daily` response. No new CLI call
+is made. Viewed daily, parallelism actually swings widely, from 1.0x to
+1.9x, and delegation from 0.8% to 56% (confirmed that collapsing this into
+a 45-day aggregate flattens out the movement).
 
-## アクティビティ(時間帯ヒートマップ)
+## Activity (hour-of-day heatmap)
 
-`cchours --daily` が返す日別・時間帯別の稼働秒数を24時間×日数のグリッドに
-並べ、その日の最大値に対する相対値(平方根スケール)で塗る。
+Lays the per-day, per-hour active-seconds returned by `cchours --daily`
+into a 24-hour × N-day grid, and shades each cell relative to that day's
+maximum (on a square-root scale).
 
-## コンテキスト使用率(分布)
+## Context usage (distribution)
 
-`ccsendstats --daily --days 30 --json` が返す、その日の全リクエストの中での
-コンテキスト使用率のp25/p50/p75。ピーク値(その日一番長く続いたセッション)は
-実測でほぼ毎日90%台に張り付き示唆が薄いため、実際に週単位で動く中央値
-(p50: 16.7%〜63%)を帯(p25-p75)付きで見せている。
+The p25/p50/p75 of context usage across that day's requests, returned by
+`ccsendstats --daily --days 30 --json`. The peak value (the day's single
+longest-running session) sits near the 90% mark almost every day in
+practice, which carries little signal, so the median is shown instead — it
+actually moves week to week (p50: 16.7%-63%) — with a p25-p75 band around
+it.
 
-## セッションあたり発話数
+## Turns per session
 
-`ccattention --json --days 30` が返す `user`(その日の発話数) ÷ `threads`
-(その日に実際に話したセッション数)。以前は「90分空いたら次の用件」という
-時間ギャップでスレッドに割っていたが、閾値が答えを作ってしまっていた
-(1日中打ち続けた日は区切りが入らず239発話が"1用件"、逆に静かな日は0用件で
-計算不能。30日実測でCV=1.15、31日中29日しか算出できず)。セッション単位なら
-チューニングパラメータが無く、同じ30日でCV=0.56・全日で算出できる。
-ただし**セッションは仕事の単位ではない**ので、これはセッションの長さであって
-「1つの仕事に何回打ったか」ではない(1本で複数話題を扱えば長く出る)。
+`user` (that day's number of turns) returned by
+`ccattention --json --days 30`, divided by `threads` (the number of
+sessions actually talked to that day). This used to split into threads
+using a time gap rule — "a new task after a 90-minute gap" — but the
+threshold was manufacturing the answer (a day spent typing continuously
+never hit a gap, so 239 turns counted as "one task"; conversely a quiet day
+produced 0 tasks and was uncomputable — over 30 days of real data, CV =
+1.15, and only 29 of 31 days could even be computed). Using the session as
+the unit removes the tuning parameter entirely — the same 30 days give CV =
+0.56, computable for every day. That said, **a session is not a unit of
+work**, so this is really the length of a session, not "how many turns one
+task took" (a single session spanning multiple topics will read as long).
 
-## 自己訂正率 / 差し戻し
+## Self-correction / bounces
 
-同じ `ccattention --json --days 30` から、日別の自己訂正率(直前の自分の発言を
-訂正した割合 = selffix数 ÷ 総発話数)と差し戻し件数(生値)。どちらも
-セッションの切り方に依存しない実数なので、負担そのものを見るならこちらの方が
-直接的。
+From the same `ccattention --json --days 30`, the daily self-correction
+rate (the share of turns that walked back the previous one = selffix count
+÷ total turns) and the raw bounce count. Both are actual counts that don't
+depend on how sessions get split, so if what you want is the raw burden
+itself, these are the more direct read.
 
-## 実行中の割り込み率
+## Interrupt rate while running
 
-`ccsendstats --daily --interrupt --days 30 --json`。実行中(前のターンがまだ完了
-していない)に次のプロンプトを送った割合。`promptSource == 'queued'` の
-エントリを分子、`typed`+`queued` を分母に、日別で集計。メインループのみ
-(サブエージェントのエントリは除外)。
+`ccsendstats --daily --interrupt --days 30 --json`. The share of prompts
+sent while running (the previous turn had not yet finished). Aggregated per
+day with entries where `promptSource == 'queued'` as the numerator and
+`typed` + `queued` as the denominator. Main loop only (subagent entries are
+excluded).
 
-## ツール失敗率
+## Tool failure rate
 
-`ccflaky --json --days 1` で今日の値、`ccflaky --daily --json --days 30`
-でトレンドを取得。`tool_use_id` でツール呼び出しとその結果を対応付け、
-エラーになった呼び出しの割合を計算する(位置ではなくIDで対応付けるので、
-並行呼び出しでも取り違えない)。
+Today's value comes from `ccflaky --json --days 1`, and the trend from
+`ccflaky --daily --json --days 30`. Tool calls are matched to their results
+by `tool_use_id`, and the share of calls that errored is computed (matching
+by ID rather than position means concurrent calls are never mismatched).
 
-## スキル発火
+## Skills fired
 
-`ccskillstats --json` で全体の発火数(Skillツール経由 + 明示的な `/name` 打鍵)、
-`ccskillstats --daily --json --days 30` で日別の内訳(`tool`=Claudeが会話中に
-自主的に選んだ回数、`typed`=自分で `/name` と打った回数、`auto`=cron等の
-自動実行)。`--unused` は `~/.claude/skills` 等ディスク上のSKILL.mdと突き合わせ、
-一度も発火していないスキルを検出する(ただしCLIに同梱されたスキルはSKILL.mdを
-持たないため、このインベントリはベストエフォート)。
+`ccskillstats --json` gives the overall fire count (via the Skill tool plus
+explicit `/name` invocations), and `ccskillstats --daily --json --days 30`
+gives the daily breakdown (`tool` = times Claude chose it on its own during
+a conversation, `typed` = times you typed `/name` yourself, `auto` =
+automatic runs such as from cron). `--unused` cross-references SKILL.md
+files on disk (e.g. under `~/.claude/skills`) to find skills that have
+never fired (skills bundled with the CLI itself have no SKILL.md, so this
+inventory is best-effort).
 
-## トークンコスト($/Mtok)
+## Token cost ($/Mtok)
 
-`ccusage daily` の日別コスト÷日別トークン数(100万トークンあたりの実費用)。
-低いほどキャッシュ効率が良いことを示す。
+`ccusage daily`'s per-day cost divided by per-day token count (actual cost
+per million tokens). Lower means better cache efficiency.
 
-## 固定トークン
+## Fixed tokens
 
-`ccsendstats --daily --baseline --days 30 --json` が返す「会話開始前(=最初の一言を
-送る前)に既に送られているトークン量」の日別平均に、メモリ蓄積の内訳
-(`feedback`/`project`/`user`/`reference` の各カテゴリの累積トークン数)を
-重ねた積み上げグラフ。メモリで説明できない残り(system prompt本体・
-CLAUDE.md本体・ツール定義など、transcriptに残らず内訳を追えない分)は
-`other` として一括りにする — 消さずに「不明」であることをそのまま見せる。
+A stacked chart of the daily average of "how many tokens are already sent
+before the conversation starts (i.e. before the first message goes out),"
+returned by `ccsendstats --daily --baseline --days 30 --json`, overlaid
+with the breakdown of accumulated memory (cumulative token counts for each
+of the `feedback`/`project`/`user`/`reference` categories). The remainder
+that memory doesn't account for — the system prompt itself, CLAUDE.md
+itself, tool definitions, and anything else that leaves no trace in the
+transcript to break down — is bucketed as `other`, shown as-is rather than
+hidden, i.e. openly "unknown."
 
 ---
 
-各指標の実装は `Sources/ccwatch/Data.swift`(CLI呼び出し・パース)と
-`Sources/ccwatch/UI.swift`(集計・描画)を参照。コード中のコメントには、
-実データで動かして確認した具体的な数値(「p75が46%〜78%で実際に動く」等)や、
-過去に削除した指標とその理由も残してある。
+For each metric's implementation, see `Sources/ccwatch/Data.swift` (CLI
+calls and parsing) and `Sources/ccwatch/UI.swift` (aggregation and
+rendering). Comments in the code also keep the concrete numbers confirmed
+by running against real data (e.g. "p75 actually moves between 46% and
+78%"), along with metrics that were removed in the past and why.

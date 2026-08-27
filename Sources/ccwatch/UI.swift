@@ -2,9 +2,7 @@ import SwiftUI
 import Charts
 import AppKit
 
-// dataviz スキルの検証済みデフォルトパレット(references/palette.md)。
-// ライト/ダークそれぞれ用に個別のhexが検証されているので、見た目だけ
-// ダークにするのではなく実際にモードごとに違う値を出す。
+// Palette values below are validated per-mode by the dataviz skill (references/palette.md), not derived by darkening.
 extension NSColor {
     convenience init(hex: String) {
         var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -24,19 +22,12 @@ extension Color {
     }
 }
 
-/// カテゴリカル配色。固定順で使う(ランクや出現順で塗り替えない) —
-/// series-1から順に、CVD安全性が検証済みの並び。
+/// Categorical palette — always used in this fixed order (series-1+), which is
+/// CVD-safety-validated; never recolor by rank or appearance order.
 enum Viz {
-    // Nordアクセントに寄せて彩度を落としたところ(Fableレビュー指摘への対応)、
-    // 今度は「コスト推移の色分けが分かりにくい」との指摘が実際に出た。
-    // dataviz スキルの validate_palette.js で検証: 落とした版は light/dark
-    // 両方でchroma floor・normal-visionともFAIL(#5e81ac等は彩度不足で
-    // 実質グレーとして読める、隣接ペアのΔEが閾値15を割る)。
-    // dataviz スキルの検証済みデフォルト(palette.md)に戻す — これはCVD安全性
-    // が実測済みの唯一の「カテゴリカル(識別)」用パレットで、目分量での再配色は
-    // スキル自体が禁止している("6. Documented palette only")。単一系列の
-    // チャート(下のaccentX群)は「識別」ではなく「単一トレンド」の仕事なので
-    // 別パレットのままで正しい — 混在ではなく役割の違い。
+    // Desaturated Nord-style colors FAILed dataviz validation (#5e81ac reads as gray,
+    // adjacent ΔE < 15) — reverted; recoloring by eye is disallowed. accentX below is
+    // a separate palette since those charts need trend, not identification.
     static let series: [Color] = [
         Color(light: "#2a78d6", dark: "#3987e5"),  // 1 blue
         Color(light: "#eb6834", dark: "#d95926"),  // 2 orange
@@ -48,26 +39,16 @@ enum Viz {
         Color(light: "#e34948", dark: "#e66767"),  // 8 red
     ]
     static let statusGood = Color(light: "#0ca30c", dark: "#0ca30c")
-    // dataviz スキルの documented palette(palette.md)どおりの値に戻す。
-    // ライト面でのコントラスト不足(1.79:1)はpalette.md自身が「by design」
-    // として明記しており、ステータス色は文字の色自体には使わずアイコンだけに
-    // 使う設計が正しい緩和策(このファイル内の実際の使用箇所は既にアイコン限定
-    // になっている)。Fableレビューの指摘を受けてこの値を勝手に変えたのは
-    // 誤りだった("Documented palette only" — ステータス色はテーマ化しない)。
+    // Light-mode contrast (1.79:1) is intentionally low, by design — mitigated by
+    // using status color only on icons, never text (already true in this file).
     static let statusWarning = Color(light: "#fab219", dark: "#fab219")
     static let statusCritical = Color(light: "#d03b3b", dark: "#d03b3b")
-    /// 単一系列のグラフ用の落ち着いたインク色(palette.mdの secondary ink)。
-    /// カテゴリカルなseries色は「識別」の仕事をする色 — 1系列しか無い
-    /// グラフに割り当てても区別する相手が無く、ただ派手なだけになる
-    /// (指摘: 「原色系が多くて洗練されていない」)。モデル別コストのような
-    /// 本当に複数系列を区別する場面だけ series を使う。
+    /// Don't use categorical series colors for single-series graphs — nothing to
+    /// distinguish, so it just looks gratuitously bright; reserve series for multi-series.
     static let ink = Color(light: "#52514e", dark: "#c3c2b7")
 
-    /// グレー一色は「素っ気ない」という指摘(開発者に馴染みのあるエディタ
-    /// 配色に寄せたい)を受けて、Nordテーマ(彩度を抑えた寒色系、開発者に
-    /// 定番の配色)からアクセントを抜粋。カテゴリカルseriesほど鮮やかでは
-    /// ないが、grayscale一色よりは個性が残る — 単一系列チャートの
-    /// 「どのカードか」を色でも軽く手掛かりにする。
+    /// Pulled from the Nord theme rather than plain gray — a light color cue for
+    /// single-series charts without the vividness of the categorical palette.
     static let accentBlue = Color(light: "#5e81ac", dark: "#81a1c1")     // nord10/9
     static let accentCyan = Color(light: "#5b8b96", dark: "#88c0d0")     // nord8
     static let accentPurple = Color(light: "#946c99", dark: "#b48ead")   // nord15
@@ -85,10 +66,8 @@ struct Card<Content: View>: View {
     }
 }
 
-/// CLI は見つかっているが、まだ結果が返っていないカード。
-/// 何も描かないと「壊れている」と「集計中」が同じ見た目になる — 重い CLI は
-/// 実測で60秒超かかるので、初回起動では必ずこの状態を通る。高さを実カードに
-/// 寄せて、値が入った瞬間に画面が飛び跳ねないようにする。
+/// Shown while a found CLI hasn't returned yet — some CLIs take 60+ seconds.
+/// Height matches the real card so layout doesn't jump when data arrives.
 struct LoadingCard: View {
     let title: String
     var height: CGFloat = 64
@@ -139,7 +118,6 @@ struct DashStat: View {
     }
 }
 
-// 経過率(0-100)。窓の開始からいま何%進んだか — 使用率の基準線。
 func elapsedPercent(resetsAt: Date, windowHours: Double) -> Double {
     let now = Date()
     let windowStart = resetsAt.addingTimeInterval(-windowHours * 3600)
@@ -147,10 +125,8 @@ func elapsedPercent(resetsAt: Date, windowHours: Double) -> Double {
     return max(0.1, min(100, elapsed / (windowHours * 3600) * 100))
 }
 
-// 経過率が10%未満の窓でペース比を出すと、リセット直後に少し使っただけで
-// 比が跳ね上がり赤ドットの誤警報になる(xbarプラグイン claude-limits.1m.sh の
-// 参照実装・CLAUDE.mdが明記する既存ルールをこのSwift版だけ落としていた —
-// レビューで発見)。経過10%未満は判定しない(nil)。
+// Under 10% elapsed the ratio spikes on light usage right after a reset and fires a
+// false alert, so don't judge (nil) below that.
 func paceRatio(usedPct: Int, resetsAt: Date, windowHours: Double) -> Double? {
     let elapsedPct = elapsedPercent(resetsAt: resetsAt, windowHours: windowHours)
     guard elapsedPct >= 10 else { return nil }
@@ -164,16 +140,10 @@ func paceColor(_ ratio: Double?) -> Color {
     return Viz.statusCritical
 }
 
-/// 時間帯×日のアクティビティ・ヒートマップ。GitHubのcontribution graph
-/// (通称「草」)と同じ緑ランプを使う — 見た目の馴染みが指標の読み方を
-/// そのまま運んでくる(濃い=よく動いた)ので、ここでは既存の共通認識に
-/// 乗る方が伝わる。sequential(1色をlight→darkで濃くする)という
-/// dataviz スキルの原則自体は満たしている。
+/// Same green ramp as GitHub's contribution graph, so darker-is-more-active reads for free.
 struct HoursHeatmap: View {
     let grid: [[Double]] // grid[dayIndex][hour], hour 0-23
 
-    // GitHub contribution graph の4段(light: #9be9a8/#40c463/#30a14e/#216e39)。
-    // ダーク面は GitHub 自身のダークテーマ側の値(#0e4429/#006d32/#26a641/#39d353)。
     private static let ramp: [Color] = [
         Color(light: "#9be9a8", dark: "#0e4429"),
         Color(light: "#40c463", dark: "#006d32"),
@@ -203,10 +173,8 @@ struct HoursHeatmap: View {
             let cellW = max(2, (availW - CGFloat(dayCount - 1) * gap) / CGFloat(dayCount))
             let cellH = geo.size.height / CGFloat(hourCount) - gap
             HStack(alignment: .top, spacing: gap) {
-                // 元は上端「0時」下端「23時」の2つだけで、真ん中のセルが何時か
-                // 読めなかった(指摘)。6時間おきに目盛りを置き、各ラベルを対応する
-                // 行の高さに合わせて配置する — セル1つ分の高さ(cellH+gap)に
-                // ラベルの箱を揃えるので、行とラベルがずれない。
+                // Ticks every 6 hours — previously only 0:00/23:00 were labeled and the
+                // middle rows were unreadable.
                 let rowH = cellH + gap
                 VStack(alignment: .trailing, spacing: 0) {
                     ForEach(Array(stride(from: 0, to: hourCount, by: 6)), id: \.self) { h in
@@ -261,9 +229,7 @@ struct RateRow: View {
                     Capsule().fill(Color.primary.opacity(0.08)).frame(height: 6)
                     Capsule().fill(paceColor(ratio))
                         .frame(width: max(2, geo.size.width * min(1, Double(window.usedPct) / 100)), height: 6)
-                    // 経過位置の基準線。.black 固定だとダークモードで
-                    // パネル背景(.regularMaterial)に対して見えなくなる
-                    // (実測で指摘) — .primary なら両テーマで見える。
+                    // .primary, not .black — .black disappears against the dark-mode panel background.
                     Rectangle().fill(Color.primary.opacity(0.7))
                         .frame(width: 1.5, height: 10)
                         .offset(x: geo.size.width * min(1, elapsed / 100))
@@ -274,30 +240,19 @@ struct RateRow: View {
     }
 }
 
-/// メニューバーの1文字1文字は他のアプリと横並びで常に視界に入る場所 —
-/// 絵文字の丸(🔴🟡🟢)は色付きテキストより主張が強く、他アプリのアイコンと
-/// 並ぶと浮く(「もっとおしゃれに」との指摘)。SF Symbolsのドット+
-/// 数字自体の色replaceで、システムのメニューバーの見た目に馴染ませる。
+/// SF Symbols dot + recolored digits, not emoji — emoji stands out next to other apps' icons.
 struct MenuBarLabel: View {
     @ObservedObject var snap: Snapshot
 
     private func ratioColor(_ ratio: Double?) -> Color? {
         guard let ratio else { return nil }
-        if ratio <= 1.0 { return nil } // オンペースは無色 — 平常時は主張しない
+        if ratio <= 1.0 { return nil } // On-pace stays colorless — no noise in the normal case
         return ratio <= 1.15 ? Viz.statusWarning : Viz.statusCritical
     }
 
-    // MenuBarExtraのラベルは、値の有無で子ビューを増減させる(if let ... { view })と
-    // NSStatusItem側の再描画が効かなくなることがある(実測: sevenDayが起動後
-    // 初回のrefreshでnil→値になった回に、Snapshot側の値は正しく更新されている
-    // ログを確認済みなのに、実際のNSStatusItemタイトルは何度観測しても更新前の
-    // まま固定された)。以前 if let を呼び出し先の関数内部に移しただけの修正を
-    // 入れたが、それでも @ViewBuilder 内の if let 自体は残っており、
-    // 効果が無いまま再発した。
-    // 対策: 個々のセグメントを@ViewBuilderの条件分岐で足し引きするのをやめ、
-    // 常に単一の具象型 Text を1つだけ返す。値が無い区間は文字列を空にする
-    // (行自体を作らない)ことで、body が組み立てる子ビューの型・個数を
-    // どんな入力でも完全に固定する。
+    // NSStatusItem stops redrawing if the label's child view count changes via if let —
+    // title froze at its old value even though Snapshot updated correctly (measured).
+    // Always emit one concrete Text; use an empty string instead of omitting a segment.
     private func windowText(_ prefix: String, _ win: RateWindow?, _ windowHours: Double) -> Text? {
         guard let win else { return nil }
         let ratio = paceRatio(usedPct: win.usedPct, resetsAt: win.resetsAt, windowHours: windowHours)
@@ -330,42 +285,24 @@ struct MenuBarLabel: View {
         return combined
     }
 
-    // MenuBarExtra のラベルは **テンプレート画像として描かれる** ので、
-    // `.foregroundStyle` で付けた色はメニューバー上で捨てられる。
-    // 実測(2026-08-27): 同じビューを ImageRenderer に通すと彩度のある画素が
-    // 117列あるのに、実機のメニューバーを撮って同じ検査をかけると 0 列。
-    // 色を計算していたのに、その色は一度も表示されていなかった。
-    //
-    // そこで自分で NSImage に焼き、`isTemplate = false` を立てて渡す。
-    // こうするとテンプレート化を通らないので色がそのまま出る。
-    // 返すビューは常に Image ひとつ(トポロジー固定)なので、下に書かれている
-    // NSStatusItem の再描画問題とも衝突しない。
-    /// `--render-preview` はこのビュー自体を ImageRenderer に通す。そこで
-    /// さらに内側で ImageRenderer を回すと入れ子になり、実測で SIGTRAP(exit 133)
-    /// で落ちた — しかも毎回ではなく散発的に。プレビュー側は焼く必要が無い
-    /// (テンプレート化を通らないので色はそのまま出る)ので、素のビューを返す。
+    // MenuBarExtra's label renders as a template image, discarding `.foregroundStyle`
+    // color (measured: 117 colored columns via ImageRenderer, 0 on the real bar).
+    // Fix: bake to NSImage with isTemplate = false.
+    /// `--render-preview` must not nest another ImageRenderer here — that crashed
+    /// sporadically with SIGTRAP (exit 133). Returns the plain view instead.
     var bakeToImage: Bool = true
 
     var body: some View {
         if bakeToImage, let img = rendered() {
             Image(nsImage: img)
         } else {
-            content   // 焼けなかったときは従来どおり(色は出ないが数字は出る)
+            content   // Fallback: no color, but numbers still show
         }
     }
 
-    /// テンプレート化を外すと、色は出る代わりに**中立の文字色も自分で決める**
-    /// ことになる。ここを `Color.primary` 任せにすると、アプリの外観(Light)に
-    /// 従って黒で焼かれ、暗いメニューバーの上で沈む(実測でそうなった)。
-    ///
-    /// しかもメニューバーの明暗はアプリの外観と一致しない。macOS は壁紙に
-    /// 合わせてメニューバーを暗くするので、**Light 外観のまま地は暗い**という
-    /// 組み合わせが普通に起きる(実測: AppleInterfaceStyle 未設定=Light、
-    /// 地の色は rgb(68,68,58))。
-    ///
-    /// 判断材料はアプリではなくステータス項目側にある。SwiftUI は
-    /// MenuBarExtra 用のウィンドウを1枚持っていて、その effectiveAppearance が
-    /// メニューバーの明暗を反映する。取れなければアプリの外観に落とす。
+    /// Color.primary bakes black per app appearance, invisible on a dark menu bar
+    /// (measured: rgb(68,68,58) while appearance was still Light). Reads
+    /// effectiveAppearance from MenuBarExtra's status window instead of the app.
     @MainActor
     private func menuBarIsDark() -> Bool {
         let names: [NSAppearance.Name] = [.aqua, .darkAqua, .vibrantLight, .vibrantDark]
@@ -394,23 +331,16 @@ struct MenuBarLabel: View {
     private var content: some View {
         let hasAlert = snap.claudeStatusIndicator.map { $0 != "none" } ?? false
         HStack(spacing: 4) {
-            // 常設のブランドアイコン。数字だけだとメニューバーの他項目に
-            // 埋もれてどれが ccwatch か分からない(指摘)。パネル見出しと同じ
-            // シンボルを使い、アイコン⇄パネルの対応をそのまま持たせる。
-            // 条件分岐を持たない=トポロジーが常に固定なので、下の
-            // NSStatusItem 再描画問題とも無関係でいられる。
+            // Permanent brand icon so ccwatch is identifiable among other menu bar items.
+            // Kept unconditional to preserve fixed view topology (see redraw issue above).
             Image(systemName: "gauge.with.dots.needle.50percent")
                 .font(.system(size: 12, weight: .semibold))
-            // Imageは常に存在させ、不要時は幅0+透明にするだけに留める
-            // (トポロジー固定と同じ理由 — 挿入・削除そのものを起こさない)。
+            // Kept always present; hidden state is width-0 + transparent, not removed — same fixed-topology reason.
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Viz.statusCritical)
                 .opacity(hasAlert ? 1 : 0)
                 .frame(width: hasAlert ? nil : 0)
-            // レート制限(h/w)はペース比で既に色が付くが、ツール失敗率はパネルを
-            // 開かないと見えなかった(指摘: 「あぶなければ色つけて」)。パネル側の
-            // 「ツール失敗率」カードと同じ閾値(10%以上で危険)をそのまま流用する
-            // — 独自の基準を増やさない。
+            // Reuses the panel's ≥10% tool-failure-rate threshold — same danger signal without opening the panel.
             let toolDanger = (snap.toolErrorRate ?? 0) >= 10
             Image(systemName: "wrench.and.screwdriver.fill")
                 .font(.system(size: 10))
@@ -423,9 +353,7 @@ struct MenuBarLabel: View {
     }
 }
 
-/// アルファベット順だと Fable/Haiku/Opus/Sonnet になり、能力の高さと
-/// 無関係な並びになる(指摘)。fable→opus→sonnet→haiku の系統順、
-/// 同系統内はバージョンの高い順に並べる。
+/// Ordered by family (fable→opus→sonnet→haiku) — alphabetical order ignores capability.
 private let modelFamilyOrder = ["fable", "opus", "sonnet", "haiku"]
 
 private func modelVersionNumbers(_ model: String) -> [Int] {
@@ -441,7 +369,7 @@ func sortedModels(_ models: [String]) -> [String] {
         let rankB = modelFamilyOrder.firstIndex(of: famB) ?? modelFamilyOrder.count
         if rankA != rankB { return rankA < rankB }
         if famA != famB { return famA < famB }
-        // 同系統はバージョン番号が大きい方を先に(4-8 と 5 なら 5 が先)。
+        // Within a family, higher version first (between 4-8 and 5, 5 comes first).
         return modelVersionNumbers(a).lexicographicallyPrecedes(modelVersionNumbers(b)) == false
     }
 }
@@ -452,17 +380,12 @@ func colorFor(model: String, in models: [String]) -> Color {
     return Viz.series[idx % Viz.series.count]
 }
 
-/// "opus-4-8" → "Opus 4.8". Version kept (not collapsed to just "Opus") —
-/// two different model generations showing as identical legend entries was
-/// exactly the bug this replaces (opus-4 and opus-5 both read "Opus").
-/// Family name isn't hardcoded, so a new one (e.g. a future model line)
-/// still renders instead of falling through to a raw truncated string.
+/// Keeps the version (not just "Opus") — opus-4 and opus-5 previously both showed as "Opus" in the legend.
 func shortModelName(_ model: String) -> String {
     let parts = model.split(separator: "-")
     guard let family = parts.first else { return model }
-    // ビルド日付("20251001"のような5桁以上の数字)はバージョンではないので
-    // 落とす — haiku-4-5-20251001 が凡例で「Haiku 4.5.20251001」と
-    // 長すぎる表示になっていた(指摘)。major.minorの2つまでに絞る。
+    // Drops 5+ digit build-date suffixes (e.g. 20251001 in haiku-4-5-20251001) — not
+    // part of the version; was rendering as "Haiku 4.5.20251001" in the legend.
     let versionParts = parts.dropFirst().prefix(2).filter { $0.count < 5 }
     let version = versionParts.joined(separator: ".")
     let capitalized = family.prefix(1).uppercased() + family.dropFirst()
@@ -486,9 +409,8 @@ struct ModelLegend: View {
 struct PanelView: View {
     @ObservedObject var snap: Snapshot
 
-    // 判定も案内も、依存6本すべてを見る。4本しか見ていなかったので、
-    // ccsendstats だけ入れた人には「見つかりません」バナーとデータカードが
-    // 同時に出ていた。
+    // Must check all 6 dependency CLIs, matching the guidance banner — checking only 4
+    // let someone with just ccsendstats installed see "not found" plus its data card.
     var anyCLIFound: Bool {
         snap.hasCchours || snap.hasCcusage || snap.hasCcflaky
             || snap.hasCcskillstats || snap.hasAttention || snap.hasCcsendstats
@@ -498,11 +420,8 @@ struct PanelView: View {
         (NSScreen.main?.visibleFrame.height ?? 900) - 80
     }
 
-    // 2本のLineMarkを.foregroundStyle(by:)無しで静的な色だけ変えて置くと、
-    // 実機で片方(2本目)が描画されなかった(実測: 稼働時間/最長連続稼働、
-    // トークン入力/出力のどちらも1本しか出ない — ユーザー指摘で発覚)。
-    // コスト推移カードで既に動いている「long format + foregroundStyle(by:)」
-    // パターンに統一する — 2軸統合の全チャートでこの構造体を使い回す。
+    // Two LineMarks with a static color and no foregroundStyle(by:) silently drop the
+    // second line on-device (measured) — always use long format + foregroundStyle(by:).
     struct DualLineRow: Identifiable {
         let id = UUID()
         let date: Date
@@ -517,12 +436,9 @@ struct PanelView: View {
         let tokens: Double
     }
 
-    // 「会話開始前の固定費」(baselineSeries、日別の合計)と「メモリ蓄積」
-    // (memoryGrowthSeries、種別ごとの累積・値が変わった日にしか点が無い)を
-    // 合成し、固定費の内訳を積み上げで見せる。メモリの値は「その日までの
-    // 最新の累積」を前方補完して使う(cumulativeは減らないので、間の日は
-    // 直前の値のままで正しい)。memoryの内訳合計を固定費から引いた残りは
-    // 「その他(system prompt・CLAUDE.md本体・ツール定義など、内訳不明)」。
+    // Merges the fixed-cost baseline with memory's cumulative-by-category series,
+    // forward-filling memory (cumulative never decreases). Unexplained remainder
+    // becomes "other" (system prompt, CLAUDE.md, tool defs, etc).
     var baselineBreakdownSeries: [BaselineBreakdownRow] {
         guard !snap.baselineSeries.isEmpty else { return [] }
         var byDayMemory: [Date: [String: Double]] = [:]
@@ -547,10 +463,8 @@ struct PanelView: View {
         return rows
     }
 
-    // 「いま/今日」(分単位で変わる: レート制限・今日のコスト・失敗率)は
-    // 常に見る価値があるので左列(tier1)へ。「30日トレンド」(日次粒度)は
-    // 右列にactivityTab/qualityTab/contextTabとしてそのまま全部並べる
-    // (タブ切り替えは「見なくなるから」の指摘で撤回、常時表示に戻した)。
+    // Left column = "right now" (changes minute to minute); right column = 30-day
+    // trends, shown in full — tab switching was tried and reverted.
     @ViewBuilder
     private var tier1: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -580,11 +494,8 @@ struct PanelView: View {
                     && snap.fiveHour == nil && snap.sevenDay == nil {
                     Text(T("Fetching…")).font(.system(size: 11)).foregroundStyle(.tertiary)
                 } else if let err = snap.rateLimitError {
-                    // status色をテキスト本体の色にすると、警告色のコントラストは
-                    // 元々アイコン+通常色ラベルの組み合わせを前提に検証されて
-                    // いる(palette.md: 単色では意味を運ばない設計)。文字は
-                    // 通常のインク色にし、アイコンだけをstatus色にする
-                    // (レビューで指摘: 本文が薄い黄でコントラスト不足)。
+                    // Status color stays on the icon only, never body text — palette.md's
+                    // warning contrast assumes icon+normal-text pairing; as text it lost contrast.
                     HStack(spacing: 4) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 11)).foregroundStyle(Viz.statusWarning)
@@ -638,9 +549,6 @@ struct PanelView: View {
             }
             if snap.hasCcusage && !snap.efficiencySeries.isEmpty {
                 Card {
-                    // 「トークン効率」は中身($/Mtok、単価)を正しく指していない
-                    // との指摘。単位をタイトルに直接入れる(以前あった説明文の
-                    // 削除と両立させる)。
                     SectionLabel(text: T("Token cost ($/Mtok)"))
                     Chart(snap.efficiencySeries) { p in
                         LineMark(x: .value(T("Date"), p.date, unit: .day), y: .value("$/Mtok", p.perMtok))
@@ -654,9 +562,7 @@ struct PanelView: View {
                             AxisValueLabel(format: .dateTime.day(), centered: true).font(.system(size: 8))
                         }
                     }
-                    // 既定の目盛り本数だと高さ34ptに対して密度が高すぎ、ラベルが
-                    // 物理的に重なっていた(Fableレビュー指摘のバグ級の問題)。
-                    // 3本に間引き、高さもカードの2段基準(44/56)のうち小さい方へ。
+                    // Default tick count overlaps labels at 34pt height — thinned to 3 ticks.
                     .chartYAxis {
                         AxisMarks(values: .automatic(desiredCount: 3)) { v in
                             AxisGridLine().foregroundStyle(.quaternary)
@@ -666,11 +572,8 @@ struct PanelView: View {
                         }
                     }
                     .frame(height: 44)
-                    // トークン数(入力/出力)は削除した — 実データで入力・出力の
-                    // 相対的な動き方がほぼ相関していて、min-max正規化しても
-                    // 2本がほぼ重なって見え、$/Mtokや他のトークン量カード
-                    // (DashStat・初期トークン数)以上の示唆が無かった
-                    // (指摘: 「あんまり意味がなさそう」)。
+                    // Input/output token count chart removed — the two move almost identically
+                    // in real data; even min-max normalized, the lines nearly overlap.
                 }
             }
 
@@ -687,12 +590,7 @@ struct PanelView: View {
             if snap.hasCchours && !snap.dailyHours.isEmpty {
                 Card {
                     SectionLabel(text: T("Hours / longest run"))
-                    // min-max正規化(自分の変動幅を相手の変動幅に写す)はしたが、
-                    // 静的な.foregroundStyle(色)を付けた2本のLineMarkを
-                    // by:無しで置いたら実機で2本目が描画されなかった(実測:
-                    // ユーザー指摘で発覚、「合体してそう」)。long format +
-                    // foregroundStyle(by:)というコスト推移カードで実績のある
-                    // パターンに統一して確実に2系列として描く。
+                    // Same foregroundStyle(by:) rendering bug as DualLineRow above.
                     let hoursVals = snap.dailyHours.map(\.agentHours)
                     let longestVals = snap.dailyHours.map(\.longestRunHours)
                     let hMin = hoursVals.min() ?? 0, hMax = max(hoursVals.max() ?? 1, hMin + 0.001)
@@ -710,10 +608,8 @@ struct PanelView: View {
                             .foregroundStyle(by: .value(T("Kind"), r.series))
                             .interpolationMethod(.monotone)
                     }
-                    // ドメインを実データの[hMin,hMax]に固定しないと、Swift Chartsが
-                    // 目盛りを0や切りのよい数に自動で広げ、右軸ラベルは左軸の広がった
-                    // 位置をhoursScaleToLongestで逆変換するため実データ範囲外
-                    // (負の値等)が出ることがある(実測: 委譲率チャートで-33%と表示)。
+                    // Domain fixed to real [hMin,hMax] — otherwise Swift Charts auto-expands
+                    // ticks and the right axis's inverse transform shows out-of-range values (measured: -33%).
                     .chartYScale(domain: hMin...hMax)
                     .chartForegroundStyleScale(domain: [T("Hours"), T("Longest run")], range: [Viz.accentCyan, Viz.accentPurple])
                     .chartLegend(.hidden)
@@ -744,9 +640,7 @@ struct PanelView: View {
 
                     Divider().padding(.vertical, 2)
 
-                    // 稼働時間と同じcchours --dailyのレスポンスから読む同一系統の
-                    // 指標(並列度・委譲率)なので、別カードではなく1枚に同居させる
-                    // (Fableレビュー指摘: 「同じデータソースの2枚は1枚にすべき」)。
+                    // Same data source as hours (cchours --daily) — kept in one card rather than split.
                     SectionLabel(text: T("Parallelism / delegation"))
                     let parVals = snap.dailyHours.map(\.parallelism)
                     let subVals = snap.dailyHours.map { $0.subShare * 100 }
@@ -765,8 +659,7 @@ struct PanelView: View {
                             .foregroundStyle(by: .value(T("Kind"), r.series))
                             .interpolationMethod(.monotone)
                     }
-                    // 稼働時間/最長連続稼働と同じ理由でドメインを固定(実測:
-                    // 固定前は右軸に-33%という負の委譲率が表示されていた)。
+                    // Domain fixed for the same reason as above (avoids negative-value axis labels).
                     .chartYScale(domain: pMin...pMax)
                     .chartForegroundStyleScale(domain: [T("Parallelism"), T("Delegation")], range: [Viz.accentCyan, Viz.accentOrange])
                     .chartLegend(.hidden)
@@ -797,16 +690,13 @@ struct PanelView: View {
                 }
             }
 
-            // 配置指示: コンテキスト使用率をアクティビティの上へ。
             if snap.pending.contains("context") && snap.contextUsageSeries.isEmpty {
                 LoadingCard(title: T("Context usage (distribution)"))
             }
             if snap.hasCcsendstats, !snap.contextUsageSeries.isEmpty {
                 Card {
                     SectionLabel(text: T("Context usage (distribution)"))
-                    // p50単独だとその日の分布の広がりが消える。peakと違って
-                    // p25/p75も日によって実際に動く(実測: p75が46%〜78%)ので、
-                    // 帯(p25-p75)+中央線(p50)のファンチャートにする。
+                    // Fan chart (p25-p75 + p50) rather than p50 alone — p25/p75 vary day to day too (measured: p75 ranged 46%-78%).
                     Text(T("band = p25–p75, line = median (p50)")).font(.system(size: 10)).foregroundStyle(.secondary)
                     Chart(snap.contextUsageSeries) { p in
                         AreaMark(x: .value(T("Date"), p.date, unit: .day), yStart: .value("p25", p.p25Pct), yEnd: .value("p75", p.p75Pct))
@@ -835,9 +725,7 @@ struct PanelView: View {
             if !snap.hourlyHeatmap.isEmpty {
                 Card {
                     SectionLabel(text: T("Activity"))
-                    // 元の56pt(24時間で割ると1セル2.3pt、実質判読不能 —
-                    // Fableレビュー指摘)から104ptに拡大し、実際に読める
-                    // セル高さ(約4.3pt)を確保する。
+                    // Enlarged 56pt → 104pt — at 56pt each cell was ~2.3pt tall; 104pt gives ~4.3pt.
                     HoursHeatmap(grid: snap.hourlyHeatmap).frame(height: 104)
                     HStack(spacing: 4) {
                         Text(T("older → newer (across) / fewer")).font(.system(size: 8)).foregroundStyle(.tertiary)
@@ -913,12 +801,8 @@ struct PanelView: View {
                         Image(systemName: "sparkles").foregroundStyle(fired == total ? Viz.statusGood : Viz.statusWarning)
                         Text(tFired(fired, total)).font(.system(size: 12, weight: .medium))
                     }
-                    // グラフを上・内訳リストを下に(ユーザー指摘: 「上にグラフで
-                    // 下に項目」)。「誰が呼んだか」— toolはClaudeが会話中に
-                    // 自主的に選んだ回数(=descriptionが拾われた証拠)、typedは
-                    // 自分で/nameと打った回数、autoはcron等の自動化。実測:
-                    // autoが63%・toolはわずか17% — descriptionが会話の中で
-                    // ほとんど拾われていないという診断になる。
+                    // tool = Claude invoked it itself, typed = user typed /name, auto = cron etc.
+                    // Measured: auto 63%, tool only 17% — descriptions are barely picked up in conversation.
                     if !snap.skillFireKindSeries.isEmpty {
                         let kindCategories = ["tool", "typed", "auto"]
                         let kindColors = [Viz.accentCyan, Viz.accentOrange, Color.secondary]
@@ -964,17 +848,9 @@ struct PanelView: View {
                 }
             }
 
-            // 配置指示: スキル発火の下へ。「対話の摩擦」カードごと削除したが
-            // (用件=90分ギャップという定義が微妙という指摘)、自己訂正率だけは
-            // 用件(スレッド)に依存しない(selffix数÷総発話数の日次比率、
-            // スレッド分割の影響を受けない)。巻き添えで消していたので復活
-            // させた — データ取得(attention)自体は引き続き動いていたので
-            // 追加コストなし。
-            // attention の主指標。これまで perThread は取得だけして表示して
-            // いなかった — 用件の定義が「90分ギャップ」という閾値頼みで、
-            // 1日中打ち続けた日が239発話/1用件になるなど値が信用できなかった
-            // ため。用件をセッション単位(閾値なし)に変えて実測CVが1.15→0.56に
-            // 下がり、全日で算出できるようになったので出す。
+            // "Task" = one session (no gap threshold) — a prior 90-min-gap definition made
+            // values unreliable (e.g. 239 utterances / 1 task on a busy day); switching
+            // dropped measured CV from 1.15 to 0.56. Self-correction rate below doesn't depend on this.
             if snap.pending.contains("attention") && snap.attentionSeries.isEmpty {
                 LoadingCard(title: T("Turns per session"))
             }
@@ -1043,9 +919,8 @@ struct PanelView: View {
                         }
                     }
                     .frame(height: 44)
-                    // 用件正規化した「差し戻し/用件」は撤去したが、生の件数は
-                    // 定義に依存しない。実測: 機能追加直後(8/14-17)は0-2で計測
-                    // できていなかっただけで、8/18以降は37-127と実際に動く。
+                    // Raw bounce count doesn't depend on the task definition above. Measured:
+                    // 0-2 right after shipping (8/14-8/17) was measurement not working yet; 37-127 from 8/18 on.
                     Text(T("Bounce count")).font(.system(size: 9)).foregroundStyle(.tertiary)
                     Chart(snap.attentionSeries) { p in
                         LineMark(x: .value(T("Date"), p.date, unit: .day), y: .value(T("Bounces"), p.blocksRaw))
@@ -1076,30 +951,18 @@ struct PanelView: View {
     @ViewBuilder
     private var contextTab: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // 「コンテキストの中身」タブ: 単価・量・内訳・固定費・使用率など、
-            // トークンの中身に関する指標をまとめる。トークン単価($/Mtok)と
-            // トークン数は尺度が全く違う(0-2 vs 数千万)ので2y軸で重ねず
-            // (dataviz スキル)、別チャートに分ける。
+            // $/Mtok and token count are on very different scales (0-2 vs tens of
+            // millions) — kept as separate charts rather than dual y-axis.
 
-            // 固定費(baseline)とその内訳(メモリ蓄積、種別別)を1枚のカードに
-            // 積み上げで統合した。memory由来で説明できない残りは「other」
-            // (system prompt・CLAUDE.md本体・ツール定義など、transcriptに
-            // 残らず内訳を追えない分)としてそのまま見せる — 消さずに
-            // 「不明」であることを示す。
+            // Combined fixed-cost baseline + memory breakdown into one stacked card —
+            // "other" is the part not explained by memory (system prompt, CLAUDE.md, tool defs, etc).
             if !baselineBreakdownSeries.isEmpty {
                 let baseCategories = ["feedback", "project", "user", "reference", "other"]
                 let baseColors = [Viz.accentOrange, Viz.accentCyan, Viz.accentPurple, Viz.accentBlue, Color.secondary]
                 Card {
-                    // 「初期トークン数(会話前)」は分かりにくいとの指摘(「これ改めて
-                    // なんだっけ？」)。会話の中身によらず毎回自動で乗る分、という
-                    // 性質そのものを名前にする。
                     SectionLabel(text: T("Fixed tokens"))
-                    // 説明文を「これが何か」+「色分けは何を表すか」の1文に統合
-                    // (副題が凡例と一致していなかった過去の指摘: 「system prompt+
-                    // CLAUDE.md+メモリ+ツール定義」と4つ並列に書いていたが、実際に
-                    // 色分けされているのはメモリの内訳(feedback/project/user/
-                    // reference)だけ — 残り3つはtranscriptに残らず分解できないため
-                    // "other"に一括りにしている)。
+                    // Only memory subcategories (feedback/project/user/reference) are actually
+                    // color-coded — system prompt/CLAUDE.md/tool defs are lumped into "other" below.
                     Text(T("Sent automatically every session regardless of what it contains. Memory plus everything else (system prompt, CLAUDE.md, tool definitions)."))
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                     Chart(baselineBreakdownSeries) { p in
@@ -1134,16 +997,10 @@ struct PanelView: View {
                 }
             }
 
-            // 入力の内訳(課金レート別)カードは削除した — 実データで96〜99%が
-            // 常にcache-readで占められ、日によってほぼ動かず示唆が無かった
-            // (指摘: 「示唆なさそうだから消そう」)。計算ロジック自体
-            // (refreshCacheMix/cacheMixSeries)は他で使う可能性があるため
-            // Data.swift側は残し、表示だけ外す。
+            // Removed the input-breakdown-by-billing-rate card — real data showed 96-99%
+            // was always cache-read, barely moving. Calc logic stays in Data.swift for reuse.
 
-            // 配置指示: 右の1番下へ移動。実行中に次のプロンプトを送った割合
-            // (ccsendstats --daily --interrupt)。実測30日で0%→100%まで明確な
-            // 上昇トレンド — 待たずに次を投げるスタイルへ変化していることを
-            // 日次でも捉えられる。
+            // Measured over 30 days: interrupt rate rose from 0% to 100%.
             if !snap.interruptSeries.isEmpty {
                 Card {
                     SectionLabel(text: T("Interrupt rate while running"))
@@ -1173,10 +1030,8 @@ struct PanelView: View {
         }
     }
 
-    // ScrollViewでImageRendererに渡すと中身が空で描画される既知の制約が
-    // あるため、実コンテンツ(スクロールなし版)を独立したViewとして切り出す。
-    // 実行時の body はこれを ScrollView で包み、--render-preview はこちらを
-    // 直接ImageRendererに渡して自然な全高で描く。
+    // ImageRenderer draws a ScrollView's content as empty (SwiftUI limitation) — real
+    // content is factored out; --render-preview draws it directly at full height.
     @ViewBuilder
     var panelContent: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1184,11 +1039,8 @@ struct PanelView: View {
                 Image(systemName: "gauge.with.dots.needle.50percent")
                     .font(.system(size: 13, weight: .semibold)).foregroundStyle(.tint)
                 Text("ccwatch").font(.system(size: 13, weight: .semibold))
-                // 公開前提(GitHub)で、各カードの計算ロジックをまとめた
-                // METRICS.mdへのリンクをアプリ上に置く(ユーザー指摘)。
-                // SwiftUIのLinkはNSButton系のブリッジで、segmentedピッカーと
-                // 同種のImageRenderer描画不具合を踏む可能性があるため避け、
-                // 自前のtap gestureでNSWorkspace.shared.openを呼ぶ。
+                // Custom tap gesture + NSWorkspace.shared.open instead of Link — Link bridges
+                // through NSButton and risks the same ImageRenderer bug as the segmented picker.
                 Text(T("how it is calculated"))
                     .font(.system(size: 10)).foregroundStyle(.secondary)
                     .underline()
@@ -1211,9 +1063,7 @@ struct PanelView: View {
             if !anyCLIFound {
                 Card {
                     SectionLabel(text: T("Commands not found"))
-                    // 依存CLIの一覧はREADMEのinstall行と同じ6本にする。ここが4本
-                    // だったので、バナーに従って入れた人は ccattention と
-                    // ccsendstats のカードが無言で出ないままになっていた。
+                    // Must match the same 6 CLIs as anyCLIFound above — this was 4, silently hiding two cards.
                     Text(T("None of cchours, ccusage, ccattention, ccflaky, ccskillstats or ccsendstats is on PATH."))
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                     Text("npm install -g cchours ccusage ccattention ccflaky ccskillstats ccsendstats")
@@ -1222,10 +1072,8 @@ struct PanelView: View {
                 }
             }
 
-            // タブ切り替えは撤回(ユーザー指摘: 「みなくなるから。全部の
-            // チャート出せると思うよ」)。左右の高さバランスを取るため、
-            // 元の「使用状況/コスト系(左) vs 品質系(右)」の分け方を踏襲し
-            // つつ改善分(統合カード・大きいheatmap・重複削除)だけ残す。
+            // Tab switching was reverted — users wanted all charts visible at once, not
+            // hidden behind tabs. Kept the original left/right split with the merge improvements.
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 10) {
                     tier1
@@ -1242,27 +1090,11 @@ struct PanelView: View {
         .padding(12)
     }
 
-    // ScrollViewは「中身を測って自分から育つ」ことをしない — .frame(maxHeight:)を
-    // 外側につけても、MenuBarExtra(.window)側は中身の実寸を知らないので既定の
-    // 小さいウィンドウ高さ(実測354pt)のまま確定してしまい、実際には740pt超ある
-    // 中身の大半が無言で隠れていた。--render-previewはScrollViewを介さず
-    // panelContentを直接描くのでこの問題自体が起きず、確認をすり抜けていた
-    // (実機のウィンドウ枠サイズをCGWindowListCopyWindowInfoで実測して発覚)。
-    // 対策: GeometryReaderで自前に測ろうとする2案(素朴な版・fixedSizeで
-    // 隠しコピーを別立てする版)はどちらも実機で0×0に潰れた(高さがまだ
-    // 決まっていない段階で中身に「利用可能な高さ」を尋ねる循環にSwiftUIが
-    // 巻き込まれ、両方0で手を打つ)。CGWindowListCopyWindowInfoで実際の
-    // ウィンドウ枠サイズを測って確認した。
-    // 対策: 自作の測定をやめ、ScrollViewに .fixedSize(vertical: true) を
-    // 付けて「中身の自然な高さ」をそのまま外側へ申告させ、その外側に
-    // .frame(maxHeight:) で上限を掛ける定石の順序にする。中身が上限以下
-    // なら fixedSize の申告どおりの高さで確定し、上限を超える時だけ
-    // frame 側の制約が勝ってScrollViewが本来のスクロールに戻る。
+    // ScrollView doesn't report its size to MenuBarExtra(.window) — settled at a
+    // default 354pt even though content was 740pt+ (measured). Manual GeometryReader
+    // measurement collapsed to 0×0 instead. Fix: .fixedSize(vertical: true) + outer .frame(maxHeight:).
     var body: some View {
-        // 元々 .frame(maxHeight:) だけで高さを打ち切っており、画面が小さいと
-        // 下のカードに到達する手段が無いままはみ出た分が無言で消えていた
-        // (レビューで発見)。ScrollViewで包み、はみ出た時はスクロールで
-        // 見えるようにする。
+        // Originally .frame(maxHeight:) alone truncated overflow with no way to reach it on small screens.
         ScrollView(.vertical) {
             panelContent
         }
@@ -1273,11 +1105,8 @@ struct PanelView: View {
     }
 }
 
-/// PanelView を実機の画面を一切使わずPNGに描き出す。ImageRenderer は
-/// オフスクリーン描画なので CGDisplayIsAsleep / 蓋閉じ状態に依存しない。
-/// snap.refresh() の完了を待つ必要があるが、init() は同期文脈なので
-/// semaphoreで単純ブロックすると MainActor の実行キューごと止まり
-/// デッドロックする — 代わりにRunLoopを回し続けて完了フラグを待つ。
+/// Renders offscreen via ImageRenderer, independent of display sleep/lid state.
+/// Spins the RunLoop while waiting for snap.refresh() — a semaphore would deadlock MainActor.
 @MainActor
 func writePNG(_ view: some View, to path: String, scale: CGFloat = 2.0) {
     let renderer = ImageRenderer(content: view)
@@ -1293,11 +1122,8 @@ func writePNG(_ view: some View, to path: String, scale: CGFloat = 2.0) {
     }
 }
 
-/// コンパクトなメニューバー表示("h5% w75%..."のラベル部分)は
-/// screencaptureに頼らないと確認できなかった(実測: 画面が起こせない
-/// ことがある — 蓋を閉じている・深いスリープ等)。panelContentと同じ
-/// 理由でこちらもオフスクリーン描画で確認できるようにする。
-/// 出力パスの拡張子の前に "-menubar" を付けたファイルにも書き出す。
+/// Also renders the compact menu bar label to PNG — screencapture can't always wake
+/// the display (lid closed / deep sleep). Writes to "<path>-menubar.png".
 func renderPreviewAndExit(to path: String) -> Never {
     var done = false
     Task { @MainActor in
@@ -1315,10 +1141,8 @@ func renderPreviewAndExit(to path: String) -> Never {
         )
         done = true
     }
-    // snap.refresh()の中の重いCLI呼び出しが何かの理由で返らないと、
-    // これも無期限に待ち続けてしまう(レビューで指摘)。上限を設けて
-    // 越えたら諦める — 個々のCLI呼び出し自体にもrunJSON側でタイムアウトが
-    // あるので通常はここに到達しないはずだが、多重の防御として置く。
+    // Deadline guards against snap.refresh() never returning — CLI calls already
+    // have their own timeout in runJSON; this is defense in depth.
     let deadline = Date().addingTimeInterval(90)
     while !done && Date() < deadline {
         RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
@@ -1336,20 +1160,14 @@ struct CCWatchApp: App {
     let timer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     init() {
-        // 診断用: `ccwatch --render-preview <path.png>` でパネルをPNGに直接
-        // レンダリングして終了する。物理ディスプレイの状態(スリープ中・
-        // 蓋が閉じている等)に一切依存しない — screencaptureが構造的に
-        // 使えない状況での見た目確認手段として追加。多重起動ガードより先に
-        // 判定する — 常駐インスタンスが既に動いている時にこそ使いたい機能
-        // なのに、ガードが先だと無言でexit(0)されて機能しなかった(実測)。
+        // Checked before the multi-instance guard below — meant to run while a resident
+        // instance is active; the guard would otherwise silently exit(0) here first.
         if let idx = CommandLine.arguments.firstIndex(of: "--render-preview"),
            idx + 1 < CommandLine.arguments.count {
             renderPreviewAndExit(to: CommandLine.arguments[idx + 1])
         }
 
-        // 多重起動は同じレート制限エンドポイントを二重に叩く原因になる
-        // (実測で起きた)。既に自分と同じbundle IDのプロセスがいたら
-        // 先発を前面に出して自分は即終了する。
+        // Guards against multiple instances double-hitting the same rate-limit endpoint (measured).
         let bundleID = Bundle.main.bundleIdentifier ?? "com.sue738.ccwatch"
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
             .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }

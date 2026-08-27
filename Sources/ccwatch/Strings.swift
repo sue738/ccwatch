@@ -1,24 +1,22 @@
 import Foundation
 
-/// 表示文字列。既定は英語で、システムの言語が日本語なら日本語にする。
+/// Display strings: English by default, Japanese when the system language is.
 ///
-/// 対応は ja / en の2つだけ。増やす予定が無いので、リソースバンドルや
-/// String Catalog を持ち込まず、コード内の表で済ませる — このアプリは
-/// 「依存を足さない」方針で、`.lproj` を足すとビルドと配布の手順が増える。
+/// Keys are English so a missing entry degrades to English, which an English
+/// reader can still use; keying on Japanese would leave untranslated Japanese
+/// in an English window.
 ///
-/// **キーは英語**。表に無い語は英語のまま出る。逆(日本語をキー)にすると、
-/// 訳を入れ忘れた語が日本語のまま英語画面に出る — 英語話者には読めない。
-/// 落ち方は「未訳の英語が混ざる」方が軽い。
+/// Two languages do not justify a resource bundle or a string catalog — .lproj
+/// directories would add steps to the build and to packaging.
 func T(_ en: String) -> String {
     guard isJapanese else { return en }
     return ja[en] ?? en
 }
 
-/// 言語の判定は起動時に一度だけ。メニューバーは毎分再描画されるので、
-/// 毎回 Locale を舐めない。
+/// Resolved once: the menu bar redraws every minute.
 let isJapanese: Bool = {
-    // -AppleLanguages "(en)" のような起動引数での上書きも効くように、
-    // UserDefaults 経由で見る(Locale.preferredLanguages と同じ経路)。
+    // Read through UserDefaults so a launch argument such as
+    // -AppleLanguages "(en)" overrides it, which is how this gets tested.
     let langs = UserDefaults.standard.stringArray(forKey: "AppleLanguages")
         ?? Locale.preferredLanguages
     guard let first = langs.first else { return false }
@@ -109,8 +107,8 @@ private let ja: [String: String] = [
     "Could not fetch rate limits": "レート制限を取得できませんでした",
 ]
 
-// 値を挟む文字列は、表に入れず関数にする。語順が言語で変わるので、
-// 断片を足し算すると片方の言語で必ず不自然になる。
+// Strings that wrap a value are functions, not table entries: word order
+// differs by language, so concatenating fragments reads wrong in one of them.
 func tHour(_ h: Int) -> String { isJapanese ? "\(h)時" : "\(h):00" }
 func tCalls(_ n: Int) -> String { isJapanese ? "\(n)回" : "\(n)×" }
 func tWindow(_ name: String) -> String { isJapanese ? "\(name)枠" : "\(name)" }

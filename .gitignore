@@ -1,6 +1,6 @@
 .build/
 dist/
 
-# アイコンは make-icon.swift から生成する中間物。icns 本体はコミットする
-# (cloneした人が swift/iconutil を持たなくてもビルドできるように)。
+# Intermediate output of make-icon.swift. The .icns itself is committed so a
+# clone can build without swift/iconutil.
 AppIcon.iconset/

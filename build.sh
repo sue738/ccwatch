@@ -1,8 +1,8 @@
 #!/bin/bash
-# ccwatch を .app にビルドする。`swift build` だけだと生の実行ファイルが
-# 出るだけで、Dockアイコンが出る・bundle identifierが無い・署名が無い状態
-# になる — 実際にこの手順を毎回手作業でやっていて、リポジトリのどこにも
-# 残っていなかった(git cloneした別の人が再現できない)。
+# Builds ccwatch into a .app. `swift build` alone leaves a bare executable that
+# shows a Dock icon, has no bundle identifier and is unsigned; these steps were
+# being done by hand and were not in the repository, so a clone could not
+# reproduce the app.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -15,8 +15,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/ccwatch "$APP/Contents/MacOS/ccwatch"
 cp Info.plist "$APP/Contents/Info.plist"
 
-# アイコンはコードから生成する(make-icon.swift が SF Symbol を描く)ので、
-# 画像ファイルの出どころが分からなくなることがない。icns が無ければ作る。
+# The icon is generated from code, so its origin never goes missing.
 if [ ! -f AppIcon.icns ]; then
   echo "==> generate AppIcon.icns"
   swift make-icon.swift
@@ -29,9 +28,9 @@ codesign --force --deep -s - "$APP"
 
 echo "==> done: $APP"
 echo ""
-echo "インストール:"
+echo "Install:"
 echo "  cp -r $APP ~/Applications/"
 echo "  open ~/Applications/ccwatch.app"
 echo ""
-echo "ログイン項目に登録(常駐させる場合):"
+echo "Add as a login item (to keep it running):"
 echo '  osascript -e '"'"'tell application "System Events" to make login item at end with properties {path:"'"$HOME"'/Applications/ccwatch.app", hidden:false}'"'"''
