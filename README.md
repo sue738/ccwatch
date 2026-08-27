@@ -17,22 +17,22 @@ panel below. Both are rendered from the app itself — the panel image comes fro
 
 See [METRICS.md](METRICS.md) for exactly how each card's number is calculated
 (source CLI, exact command, and the formula) — also linked from inside the app
-itself ("計算ロジック" next to the title).
+itself ("how it is calculated" next to the title).
 
 Each card only appears if its CLI is installed — no error, no placeholder, it just isn't there:
 
-- **稼働時間 / コスト / トークン** (today + 30-day) — `cchours` and `ccusage`
-- **レート制限** (5-hour, weekly, and any model-scoped weekly window) — read directly from `https://api.anthropic.com/api/oauth/usage`, authenticated with the OAuth token Claude Code itself already stores in your Keychain (or `~/.claude/.credentials.json` as a fallback). Read-only: ccwatch never writes back to your credentials.
-- **コスト推移 / トークンコスト($/Mtok)** — 30-day stacked cost by model, and cost per million tokens — `ccusage`
-- **稼働時間 / 最長連続稼働 / アクティビティ** — daily hours, longest unbroken run, hour×day heatmap — `cchours`
-- **並列度 / 委譲率** — how many agents ran at once, and what share of that time was delegated to subagents — `cchours`
-- **固定トークン** — the always-on token overhead sent before your first word, broken down against your own memory files — `ccsendstats`
-- **コンテキスト使用率(分布)** — daily p25/p50/p75 of how full the context window got — `ccsendstats`
-- **実行中の割り込み率** — share of prompts sent while the previous turn was still running — `ccsendstats`
-- **ツール失敗率** — which tools are failing, and how often — `ccflaky`
-- **スキル発火** — which of your Claude Code skills actually fire — `ccskillstats`
-- **セッションあたり発話数** — how long an average conversation ran — `ccattention`
-- **自己訂正率 / 差し戻し** — how often the assistant walked back its own answer, and how often a hook bounced it — `ccattention`
+- **Hours / cost / tokens** (today + 30-day) — `cchours` and `ccusage`
+- **Rate limits** (5-hour, weekly, and any model-scoped weekly window) — read directly from `https://api.anthropic.com/api/oauth/usage`, authenticated with the OAuth token Claude Code itself already stores in your Keychain (or `~/.claude/.credentials.json` as a fallback). Read-only: ccwatch never writes back to your credentials.
+- **Cost trend / token cost ($/Mtok)** — 30-day stacked cost by model, and cost per million tokens — `ccusage`
+- **Hours / longest run / activity** — daily hours, longest unbroken run, hour×day heatmap — `cchours`
+- **Parallelism / delegation** — how many agents ran at once, and what share of that time was delegated to subagents — `cchours`
+- **Fixed tokens** — the always-on token overhead sent before your first word, broken down against your own memory files — `ccsendstats`
+- **Context usage (distribution)** — daily p25/p50/p75 of how full the context window got — `ccsendstats`
+- **Interrupt rate while running** — share of prompts sent while the previous turn was still running — `ccsendstats`
+- **Tool failure rate** — which tools are failing, and how often — `ccflaky`
+- **Skills fired** — which of your Claude Code skills actually fire — `ccskillstats`
+- **Turns per session** — how long an average conversation ran — `ccattention`
+- **Self-correction / bounces** — how often the assistant walked back its own answer, and how often a hook bounced it — `ccattention`
 
 ## Install
 
@@ -52,8 +52,8 @@ appear. No error, no placeholder. But install all of them and you get the
 full board.
 
 **Requirements: macOS 14 or later, and the Xcode command line tools** (`xcode-select
---install`) for `swift build`. The app's UI is in Japanese; the CLIs it reads
-are English by default.
+--install`) for `swift build`. The interface follows your system language —
+Japanese if that is your first preferred language, English otherwise.
 
 `build.sh` builds the release binary, assembles `dist/ccwatch.app` (with a
 proper `Info.plist` — bundle identifier, `LSUIElement` so it doesn't show in

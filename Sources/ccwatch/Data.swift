@@ -660,7 +660,7 @@ final class Snapshot: ObservableObject {
         let token = await Task.detached(priority: .userInitiated) { self.readAccessToken() }.value
         guard let token else {
             hasCredentials = false
-            rateLimitError = "ログイン情報が見つかりません(claude でログインしてください)"
+            rateLimitError = T("Not signed in (run claude to log in)")
             nextRateLimit = Date().addingTimeInterval(rateLimitBaseTTL)
             return
         }
@@ -678,10 +678,10 @@ final class Snapshot: ObservableObject {
         }
         guard let usage, statusCode == 200, let limits = usage["limits"] as? [[String: Any]] else {
             rateLimitError = statusCode == 401
-                ? "ログインの有効期限が切れています(claude を一度実行してください)"
+                ? T("Login expired (run claude once)")
                 : statusCode == 429
-                ? "レート制限に達しました(次回更新時に再試行します)"
-                : "レート制限を取得できませんでした"
+                ? T("Rate limited (will retry on the next refresh)")
+                : T("Could not fetch rate limits")
             if ProcessInfo.processInfo.environment["CCWATCH_DEBUG_RATELIMIT"] != nil {
                 let ts = ISO8601DateFormatter().string(from: Date())
                 FileHandle.standardError.write(

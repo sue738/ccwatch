@@ -103,7 +103,7 @@ struct LoadingCard: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .scaleEffect(x: w, y: 1, anchor: .leading)
                 }
-                Text("集計中…").font(.system(size: 10)).foregroundStyle(.tertiary)
+                Text(T("Counting…")).font(.system(size: 10)).foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, minHeight: height, alignment: .topLeading)
         }
@@ -133,7 +133,7 @@ struct DashStat: View {
                 Text(label).font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary)
             }
             Text(today ?? "–").font(.system(size: 19, weight: .bold, design: .rounded))
-            Text("30日 " + (range ?? "–")).font(.system(size: 9)).foregroundStyle(.tertiary)
+            Text(T("30d ") + (range ?? "–")).font(.system(size: 9)).foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -210,7 +210,7 @@ struct HoursHeatmap: View {
                 let rowH = cellH + gap
                 VStack(alignment: .trailing, spacing: 0) {
                     ForEach(Array(stride(from: 0, to: hourCount, by: 6)), id: \.self) { h in
-                        Text("\(h)時")
+                        Text(tHour(h))
                             .font(.system(size: 7)).foregroundStyle(.tertiary)
                             .frame(height: rowH, alignment: .top)
                         if h + 6 < hourCount {
@@ -558,15 +558,15 @@ struct PanelView: View {
                 Card {
                     HStack(alignment: .top, spacing: 0) {
                         if snap.hasCchours {
-                            DashStat(icon: "clock.fill", color: Viz.accentBlue, label: "稼働時間",
+                            DashStat(icon: "clock.fill", color: Viz.accentBlue, label: T("Hours"),
                                      today: snap.agentHoursToday.map { String(format: "%.1fh", $0) },
                                      range: snap.agentHours30.map { String(format: "%.0fh", $0) })
                         }
                         if snap.hasCcusage {
-                            DashStat(icon: "dollarsign.circle.fill", color: Viz.accentOrange, label: "コスト",
+                            DashStat(icon: "dollarsign.circle.fill", color: Viz.accentOrange, label: T("Cost"),
                                      today: snap.costToday.map(moneyFmt),
                                      range: snap.cost30.map(moneyFmt))
-                            DashStat(icon: "circle.hexagongrid.fill", color: Viz.accentPurple, label: "トークン",
+                            DashStat(icon: "circle.hexagongrid.fill", color: Viz.accentPurple, label: T("Tokens"),
                                      today: snap.tokensToday.map(tokFmt),
                                      range: snap.tokens30.map(tokFmt))
                         }
@@ -575,10 +575,10 @@ struct PanelView: View {
             }
 
             Card {
-                SectionLabel(text: "レート制限")
+                SectionLabel(text: T("Rate limits"))
                 if snap.pending.contains("rate") && snap.rateLimitError == nil
                     && snap.fiveHour == nil && snap.sevenDay == nil {
-                    Text("取得中…").font(.system(size: 11)).foregroundStyle(.tertiary)
+                    Text(T("Fetching…")).font(.system(size: 11)).foregroundStyle(.tertiary)
                 } else if let err = snap.rateLimitError {
                     // status色をテキスト本体の色にすると、警告色のコントラストは
                     // 元々アイコン+通常色ラベルの組み合わせを前提に検証されて
@@ -591,25 +591,25 @@ struct PanelView: View {
                         Text(err).font(.system(size: 11)).foregroundStyle(.primary)
                     }
                 } else {
-                    if let fh = snap.fiveHour { RateRow(label: "5時間枠", window: fh, windowHours: 5) }
-                    if let sd = snap.sevenDay { RateRow(label: "週次枠", window: sd, windowHours: 24 * 7) }
+                    if let fh = snap.fiveHour { RateRow(label: T("5-hour"), window: fh, windowHours: 5) }
+                    if let sd = snap.sevenDay { RateRow(label: T("Weekly"), window: sd, windowHours: 24 * 7) }
                     ForEach(snap.scopedLimits) { s in
-                        RateRow(label: "\(s.name)枠", window: RateWindow(usedPct: s.pct, resetsAt: s.resetsAt),
+                        RateRow(label: tWindow(s.name), window: RateWindow(usedPct: s.pct, resetsAt: s.resetsAt),
                                  windowHours: 24 * 7)
                     }
                 }
             }
 
             if snap.pending.contains("cost") && snap.costSeries.isEmpty {
-                LoadingCard(title: "コスト推移", height: 84)
+                LoadingCard(title: T("Cost trend"), height: 84)
             }
             if snap.hasCcusage && !snap.costSeries.isEmpty {
                 Card {
-                    SectionLabel(text: "コスト推移")
+                    SectionLabel(text: T("Cost trend"))
                     let models = Array(Set(snap.costSeries.map(\.model)))
                     Chart(snap.costSeries) { p in
-                        AreaMark(x: .value("日付", p.date, unit: .day), y: .value("$", p.cost), stacking: .standard)
-                            .foregroundStyle(by: .value("モデル", p.model))
+                        AreaMark(x: .value(T("Date"), p.date, unit: .day), y: .value("$", p.cost), stacking: .standard)
+                            .foregroundStyle(by: .value(T("Model"), p.model))
                             .interpolationMethod(.monotone)
                     }
                     .chartForegroundStyleScale(domain: sortedModels(models), range: sortedModels(models).map { colorFor(model: $0, in: models) })
@@ -634,18 +634,18 @@ struct PanelView: View {
             }
 
             if snap.pending.contains("cost") && snap.efficiencySeries.isEmpty {
-                LoadingCard(title: "トークンコスト($/Mtok)")
+                LoadingCard(title: T("Token cost ($/Mtok)"))
             }
             if snap.hasCcusage && !snap.efficiencySeries.isEmpty {
                 Card {
                     // 「トークン効率」は中身($/Mtok、単価)を正しく指していない
                     // との指摘。単位をタイトルに直接入れる(以前あった説明文の
                     // 削除と両立させる)。
-                    SectionLabel(text: "トークンコスト($/Mtok)")
+                    SectionLabel(text: T("Token cost ($/Mtok)"))
                     Chart(snap.efficiencySeries) { p in
-                        LineMark(x: .value("日付", p.date, unit: .day), y: .value("$/Mtok", p.perMtok))
+                        LineMark(x: .value(T("Date"), p.date, unit: .day), y: .value("$/Mtok", p.perMtok))
                             .foregroundStyle(Viz.accentBlue).interpolationMethod(.monotone)
-                        PointMark(x: .value("日付", p.date, unit: .day), y: .value("$/Mtok", p.perMtok))
+                        PointMark(x: .value(T("Date"), p.date, unit: .day), y: .value("$/Mtok", p.perMtok))
                             .foregroundStyle(Viz.accentBlue).symbolSize(10)
                     }
                     .chartXAxis {
@@ -682,11 +682,11 @@ struct PanelView: View {
     private var activityTab: some View {
         VStack(alignment: .leading, spacing: 10) {
             if snap.pending.contains("hours") && snap.dailyHours.isEmpty {
-                LoadingCard(title: "稼働時間 / 最長連続稼働", height: 84)
+                LoadingCard(title: T("Hours / longest run"), height: 84)
             }
             if snap.hasCchours && !snap.dailyHours.isEmpty {
                 Card {
-                    SectionLabel(text: "稼働時間 / 最長連続稼働")
+                    SectionLabel(text: T("Hours / longest run"))
                     // min-max正規化(自分の変動幅を相手の変動幅に写す)はしたが、
                     // 静的な.foregroundStyle(色)を付けた2本のLineMarkを
                     // by:無しで置いたら実機で2本目が描画されなかった(実測:
@@ -701,13 +701,13 @@ struct PanelView: View {
                     let hoursScaleToLongest: (Double) -> Double = { (($0 - hMin) / (hMax - hMin)) * (lMax - lMin) + lMin }
                     let hoursRows: [DualLineRow] = snap.dailyHours.flatMap { row in
                         [
-                            DualLineRow(date: row.date, series: "稼働時間", value: row.agentHours),
-                            DualLineRow(date: row.date, series: "最長連続稼働", value: longestToHoursScale(row.longestRunHours)),
+                            DualLineRow(date: row.date, series: T("Hours"), value: row.agentHours),
+                            DualLineRow(date: row.date, series: T("Longest run"), value: longestToHoursScale(row.longestRunHours)),
                         ]
                     }
                     Chart(hoursRows) { r in
-                        LineMark(x: .value("日付", r.date, unit: .day), y: .value("時間", r.value))
-                            .foregroundStyle(by: .value("種別", r.series))
+                        LineMark(x: .value(T("Date"), r.date, unit: .day), y: .value(T("Time"), r.value))
+                            .foregroundStyle(by: .value(T("Kind"), r.series))
                             .interpolationMethod(.monotone)
                     }
                     // ドメインを実データの[hMin,hMax]に固定しないと、Swift Chartsが
@@ -715,7 +715,7 @@ struct PanelView: View {
                     // 位置をhoursScaleToLongestで逆変換するため実データ範囲外
                     // (負の値等)が出ることがある(実測: 委譲率チャートで-33%と表示)。
                     .chartYScale(domain: hMin...hMax)
-                    .chartForegroundStyleScale(domain: ["稼働時間", "最長連続稼働"], range: [Viz.accentCyan, Viz.accentPurple])
+                    .chartForegroundStyleScale(domain: [T("Hours"), T("Longest run")], range: [Viz.accentCyan, Viz.accentPurple])
                     .chartLegend(.hidden)
                     .chartXAxis {
                         AxisMarks(values: .stride(by: .day, count: 3)) { _ in
@@ -738,8 +738,8 @@ struct PanelView: View {
                     }
                     .frame(height: 56)
                     HStack(spacing: 10) {
-                        HStack(spacing: 3) { Circle().fill(Viz.accentCyan).frame(width: 6, height: 6); Text("稼働時間").font(.system(size: 9)).foregroundStyle(.secondary) }
-                        HStack(spacing: 3) { Circle().fill(Viz.accentPurple).frame(width: 6, height: 6); Text("最長連続稼働").font(.system(size: 9)).foregroundStyle(.secondary) }
+                        HStack(spacing: 3) { Circle().fill(Viz.accentCyan).frame(width: 6, height: 6); Text(T("Hours")).font(.system(size: 9)).foregroundStyle(.secondary) }
+                        HStack(spacing: 3) { Circle().fill(Viz.accentPurple).frame(width: 6, height: 6); Text(T("Longest run")).font(.system(size: 9)).foregroundStyle(.secondary) }
                     }
 
                     Divider().padding(.vertical, 2)
@@ -747,7 +747,7 @@ struct PanelView: View {
                     // 稼働時間と同じcchours --dailyのレスポンスから読む同一系統の
                     // 指標(並列度・委譲率)なので、別カードではなく1枚に同居させる
                     // (Fableレビュー指摘: 「同じデータソースの2枚は1枚にすべき」)。
-                    SectionLabel(text: "並列度 / 委譲率")
+                    SectionLabel(text: T("Parallelism / delegation"))
                     let parVals = snap.dailyHours.map(\.parallelism)
                     let subVals = snap.dailyHours.map { $0.subShare * 100 }
                     let pMin = parVals.min() ?? 0, pMax = max(parVals.max() ?? 1, pMin + 0.001)
@@ -756,19 +756,19 @@ struct PanelView: View {
                     let parScaleToSub: (Double) -> Double = { (($0 - pMin) / (pMax - pMin)) * (sMax - sMin) + sMin }
                     let rows: [DualLineRow] = snap.dailyHours.flatMap { row in
                         [
-                            DualLineRow(date: row.date, series: "並列度", value: row.parallelism),
-                            DualLineRow(date: row.date, series: "委譲率", value: subToParScale(row.subShare * 100)),
+                            DualLineRow(date: row.date, series: T("Parallelism"), value: row.parallelism),
+                            DualLineRow(date: row.date, series: T("Delegation"), value: subToParScale(row.subShare * 100)),
                         ]
                     }
                     Chart(rows) { r in
-                        LineMark(x: .value("日付", r.date, unit: .day), y: .value("値", r.value))
-                            .foregroundStyle(by: .value("種別", r.series))
+                        LineMark(x: .value(T("Date"), r.date, unit: .day), y: .value(T("Value"), r.value))
+                            .foregroundStyle(by: .value(T("Kind"), r.series))
                             .interpolationMethod(.monotone)
                     }
                     // 稼働時間/最長連続稼働と同じ理由でドメインを固定(実測:
                     // 固定前は右軸に-33%という負の委譲率が表示されていた)。
                     .chartYScale(domain: pMin...pMax)
-                    .chartForegroundStyleScale(domain: ["並列度", "委譲率"], range: [Viz.accentCyan, Viz.accentOrange])
+                    .chartForegroundStyleScale(domain: [T("Parallelism"), T("Delegation")], range: [Viz.accentCyan, Viz.accentOrange])
                     .chartLegend(.hidden)
                     .chartXAxis {
                         AxisMarks(values: .stride(by: .day, count: 3)) { _ in
@@ -791,27 +791,27 @@ struct PanelView: View {
                     }
                     .frame(height: 56)
                     HStack(spacing: 10) {
-                        HStack(spacing: 3) { Circle().fill(Viz.accentCyan).frame(width: 6, height: 6); Text("並列度(同時実行の倍率)").font(.system(size: 9)).foregroundStyle(.secondary) }
-                        HStack(spacing: 3) { Circle().fill(Viz.accentOrange).frame(width: 6, height: 6); Text("委譲率(サブエージェント時間の割合)").font(.system(size: 9)).foregroundStyle(.secondary) }
+                        HStack(spacing: 3) { Circle().fill(Viz.accentCyan).frame(width: 6, height: 6); Text(T("Parallelism (concurrent agents)")).font(.system(size: 9)).foregroundStyle(.secondary) }
+                        HStack(spacing: 3) { Circle().fill(Viz.accentOrange).frame(width: 6, height: 6); Text(T("Delegation (share of subagent time)")).font(.system(size: 9)).foregroundStyle(.secondary) }
                     }
                 }
             }
 
             // 配置指示: コンテキスト使用率をアクティビティの上へ。
             if snap.pending.contains("context") && snap.contextUsageSeries.isEmpty {
-                LoadingCard(title: "コンテキスト使用率(分布)")
+                LoadingCard(title: T("Context usage (distribution)"))
             }
             if snap.hasCcsendstats, !snap.contextUsageSeries.isEmpty {
                 Card {
-                    SectionLabel(text: "コンテキスト使用率(分布)")
+                    SectionLabel(text: T("Context usage (distribution)"))
                     // p50単独だとその日の分布の広がりが消える。peakと違って
                     // p25/p75も日によって実際に動く(実測: p75が46%〜78%)ので、
                     // 帯(p25-p75)+中央線(p50)のファンチャートにする。
-                    Text("帯 = p25-p75、線 = 中央値(p50)").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text(T("band = p25–p75, line = median (p50)")).font(.system(size: 10)).foregroundStyle(.secondary)
                     Chart(snap.contextUsageSeries) { p in
-                        AreaMark(x: .value("日付", p.date, unit: .day), yStart: .value("p25", p.p25Pct), yEnd: .value("p75", p.p75Pct))
+                        AreaMark(x: .value(T("Date"), p.date, unit: .day), yStart: .value("p25", p.p25Pct), yEnd: .value("p75", p.p75Pct))
                             .foregroundStyle(Viz.accentPurple.opacity(0.2)).interpolationMethod(.monotone)
-                        LineMark(x: .value("日付", p.date, unit: .day), y: .value("p50", p.p50Pct))
+                        LineMark(x: .value(T("Date"), p.date, unit: .day), y: .value("p50", p.p50Pct))
                             .foregroundStyle(Viz.accentPurple).interpolationMethod(.monotone)
                     }
                     .chartXAxis {
@@ -834,17 +834,17 @@ struct PanelView: View {
 
             if !snap.hourlyHeatmap.isEmpty {
                 Card {
-                    SectionLabel(text: "アクティビティ")
+                    SectionLabel(text: T("Activity"))
                     // 元の56pt(24時間で割ると1セル2.3pt、実質判読不能 —
                     // Fableレビュー指摘)から104ptに拡大し、実際に読める
                     // セル高さ(約4.3pt)を確保する。
                     HoursHeatmap(grid: snap.hourlyHeatmap).frame(height: 104)
                     HStack(spacing: 4) {
-                        Text("古い日→新しい日 (横) / 少ない").font(.system(size: 8)).foregroundStyle(.tertiary)
+                        Text(T("older → newer (across) / fewer")).font(.system(size: 8)).foregroundStyle(.tertiary)
                         ForEach(0..<5) { i in
                             Rectangle().fill(HoursHeatmap.legendColor(i)).frame(width: 8, height: 8)
                         }
-                        Text("多い").font(.system(size: 8)).foregroundStyle(.tertiary)
+                        Text(T("more")).font(.system(size: 8)).foregroundStyle(.tertiary)
                     }
                 }
             }
@@ -855,23 +855,23 @@ struct PanelView: View {
     private var qualityTab: some View {
         VStack(alignment: .leading, spacing: 10) {
             if snap.pending.contains("tool") && snap.toolErrorRate == nil {
-                LoadingCard(title: "ツール失敗率", height: 40)
+                LoadingCard(title: T("Tool failure rate"), height: 40)
             }
             if snap.hasCcflaky, let rate = snap.toolErrorRate {
                 Card {
-                    SectionLabel(text: "ツール失敗率")
+                    SectionLabel(text: T("Tool failure rate"))
                     HStack {
                         Image(systemName: "wrench.and.screwdriver.fill")
                             .foregroundStyle(rate >= 10 ? Viz.statusCritical : rate >= 5 ? Viz.statusWarning : .secondary)
-                        Text(String(format: "今日 %.1f%%", rate)).font(.system(size: 12, weight: .medium))
+                        Text(tToday(rate)).font(.system(size: 12, weight: .medium))
                         Spacer()
                         if let n = snap.toolCallsToday {
-                            Text("\(n)回").font(.system(size: 10)).foregroundStyle(.tertiary)
+                            Text(tCalls(n)).font(.system(size: 10)).foregroundStyle(.tertiary)
                         }
                     }
                     if !snap.errorRateSeries.isEmpty {
                         Chart(snap.errorRateSeries) { p in
-                            LineMark(x: .value("日付", p.date, unit: .day), y: .value("失敗率", p.errorRate))
+                            LineMark(x: .value(T("Date"), p.date, unit: .day), y: .value(T("Failure rate"), p.errorRate))
                                 .foregroundStyle(p.errorRate >= 10 ? Viz.statusCritical : Viz.statusWarning)
                                 .interpolationMethod(.monotone)
                         }
@@ -904,14 +904,14 @@ struct PanelView: View {
             }
 
             if snap.pending.contains("skills") && snap.skillsTotal == nil {
-                LoadingCard(title: "スキル発火", height: 64)
+                LoadingCard(title: T("Skills fired"), height: 64)
             }
             if snap.hasCcskillstats, let fired = snap.skillsFired, let total = snap.skillsTotal, total > 0 {
                 Card {
-                    SectionLabel(text: "スキル発火")
+                    SectionLabel(text: T("Skills fired"))
                     HStack {
                         Image(systemName: "sparkles").foregroundStyle(fired == total ? Viz.statusGood : Viz.statusWarning)
-                        Text("\(fired) / \(total) 発火").font(.system(size: 12, weight: .medium))
+                        Text(tFired(fired, total)).font(.system(size: 12, weight: .medium))
                     }
                     // グラフを上・内訳リストを下に(ユーザー指摘: 「上にグラフで
                     // 下に項目」)。「誰が呼んだか」— toolはClaudeが会話中に
@@ -923,8 +923,8 @@ struct PanelView: View {
                         let kindCategories = ["tool", "typed", "auto"]
                         let kindColors = [Viz.accentCyan, Viz.accentOrange, Color.secondary]
                         Chart(snap.skillFireKindSeries) { r in
-                            AreaMark(x: .value("日付", r.date, unit: .day), y: .value("回数", r.count), stacking: .standard)
-                                .foregroundStyle(by: .value("種別", r.kind))
+                            AreaMark(x: .value(T("Date"), r.date, unit: .day), y: .value(T("Count"), r.count), stacking: .standard)
+                                .foregroundStyle(by: .value(T("Kind"), r.kind))
                         }
                         .chartForegroundStyleScale(domain: kindCategories, range: kindColors)
                         .chartLegend(.hidden)
@@ -957,7 +957,7 @@ struct PanelView: View {
                             Text(s.name).font(.system(size: 10)).foregroundStyle(.secondary)
                                 .lineLimit(1).truncationMode(.head).frame(maxWidth: 170, alignment: .leading)
                             Spacer(minLength: 0)
-                            Text("\(s.total)回")
+                            Text(tCalls(s.total))
                                 .font(.system(size: 10, design: .monospaced)).foregroundStyle(Viz.accentPurple).fixedSize()
                         }
                     }
@@ -976,25 +976,25 @@ struct PanelView: View {
             // ため。用件をセッション単位(閾値なし)に変えて実測CVが1.15→0.56に
             // 下がり、全日で算出できるようになったので出す。
             if snap.pending.contains("attention") && snap.attentionSeries.isEmpty {
-                LoadingCard(title: "セッションあたり発話数")
+                LoadingCard(title: T("Turns per session"))
             }
             if snap.hasAttention, !snap.attentionSeries.isEmpty {
                 Card {
-                    SectionLabel(text: "セッションあたり発話数")
+                    SectionLabel(text: T("Turns per session"))
                     if let today = snap.attentionPerThreadToday {
                         HStack {
                             Image(systemName: "bubble.left.and.bubble.right.fill")
                                 .foregroundStyle(Viz.accentCyan)
-                            Text(String(format: "今日 %.1f 発話/セッション", today))
+                            Text(tTodayTurns(today))
                                 .font(.system(size: 12, weight: .medium))
                         }
                     }
-                    Text("1セッションが平均何往復か。長い=1本で色々やった or 手間取った")
+                    Text(T("how many round trips an average session took"))
                         .font(.system(size: 9)).foregroundStyle(.tertiary)
                     Chart(snap.attentionSeries) { p in
-                        LineMark(x: .value("日付", p.date, unit: .day), y: .value("発話/セッション", p.perThread))
+                        LineMark(x: .value(T("Date"), p.date, unit: .day), y: .value(T("turns/session"), p.perThread))
                             .foregroundStyle(Viz.accentCyan).interpolationMethod(.monotone)
-                        PointMark(x: .value("日付", p.date, unit: .day), y: .value("発話/セッション", p.perThread))
+                        PointMark(x: .value(T("Date"), p.date, unit: .day), y: .value(T("turns/session"), p.perThread))
                             .foregroundStyle(Viz.accentCyan).symbolSize(10)
                     }
                     .chartXAxis {
@@ -1016,16 +1016,16 @@ struct PanelView: View {
             }
 
             if snap.pending.contains("attention") && snap.attentionSeries.isEmpty {
-                LoadingCard(title: "自己訂正率 / 差し戻し")
+                LoadingCard(title: T("Self-correction / bounces"))
             }
             if snap.hasAttention, !snap.attentionSeries.isEmpty {
                 Card {
-                    SectionLabel(text: "自己訂正率 / 差し戻し")
-                    Text("直前の自分の発言を訂正した割合").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    SectionLabel(text: T("Self-correction / bounces"))
+                    Text(T("share of turns that walked back the previous one")).font(.system(size: 9)).foregroundStyle(.tertiary)
                     Chart(snap.attentionSeries) { p in
-                        LineMark(x: .value("日付", p.date, unit: .day), y: .value("自己訂正率", p.selffixRate))
+                        LineMark(x: .value(T("Date"), p.date, unit: .day), y: .value(T("Self-correction"), p.selffixRate))
                             .foregroundStyle(Viz.accentOrange).interpolationMethod(.monotone)
-                        PointMark(x: .value("日付", p.date, unit: .day), y: .value("自己訂正率", p.selffixRate))
+                        PointMark(x: .value(T("Date"), p.date, unit: .day), y: .value(T("Self-correction"), p.selffixRate))
                             .foregroundStyle(Viz.accentOrange).symbolSize(10)
                     }
                     .chartXAxis {
@@ -1046,11 +1046,11 @@ struct PanelView: View {
                     // 用件正規化した「差し戻し/用件」は撤去したが、生の件数は
                     // 定義に依存しない。実測: 機能追加直後(8/14-17)は0-2で計測
                     // できていなかっただけで、8/18以降は37-127と実際に動く。
-                    Text("差し戻し件数").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    Text(T("Bounce count")).font(.system(size: 9)).foregroundStyle(.tertiary)
                     Chart(snap.attentionSeries) { p in
-                        LineMark(x: .value("日付", p.date, unit: .day), y: .value("差し戻し", p.blocksRaw))
+                        LineMark(x: .value(T("Date"), p.date, unit: .day), y: .value(T("Bounces"), p.blocksRaw))
                             .foregroundStyle(Viz.accentRed).interpolationMethod(.monotone)
-                        PointMark(x: .value("日付", p.date, unit: .day), y: .value("差し戻し", p.blocksRaw))
+                        PointMark(x: .value(T("Date"), p.date, unit: .day), y: .value(T("Bounces"), p.blocksRaw))
                             .foregroundStyle(Viz.accentRed).symbolSize(10)
                     }
                     .chartXAxis {
@@ -1093,18 +1093,18 @@ struct PanelView: View {
                     // 「初期トークン数(会話前)」は分かりにくいとの指摘(「これ改めて
                     // なんだっけ？」)。会話の中身によらず毎回自動で乗る分、という
                     // 性質そのものを名前にする。
-                    SectionLabel(text: "固定トークン")
+                    SectionLabel(text: T("Fixed tokens"))
                     // 説明文を「これが何か」+「色分けは何を表すか」の1文に統合
                     // (副題が凡例と一致していなかった過去の指摘: 「system prompt+
                     // CLAUDE.md+メモリ+ツール定義」と4つ並列に書いていたが、実際に
                     // 色分けされているのはメモリの内訳(feedback/project/user/
                     // reference)だけ — 残り3つはtranscriptに残らず分解できないため
                     // "other"に一括りにしている)。
-                    Text("セッションの中身によらず毎回自動で送られる分。内訳はメモリ + その他(system prompt・CLAUDE.md・ツール定義)")
+                    Text(T("Sent automatically every session regardless of what it contains. Memory plus everything else (system prompt, CLAUDE.md, tool definitions)."))
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                     Chart(baselineBreakdownSeries) { p in
-                        AreaMark(x: .value("日付", p.date, unit: .day), y: .value("トークン", p.tokens), stacking: .standard)
-                            .foregroundStyle(by: .value("種別", p.category))
+                        AreaMark(x: .value(T("Date"), p.date, unit: .day), y: .value(T("Tokens"), p.tokens), stacking: .standard)
+                            .foregroundStyle(by: .value(T("Kind"), p.category))
                     }
                     .chartForegroundStyleScale(domain: baseCategories, range: baseColors)
                     .chartLegend(.hidden)
@@ -1146,9 +1146,9 @@ struct PanelView: View {
             // 日次でも捉えられる。
             if !snap.interruptSeries.isEmpty {
                 Card {
-                    SectionLabel(text: "実行中の割り込み率")
+                    SectionLabel(text: T("Interrupt rate while running"))
                     Chart(snap.interruptSeries) { p in
-                        LineMark(x: .value("日付", p.date, unit: .day), y: .value("割り込み率", p.interruptRate))
+                        LineMark(x: .value(T("Date"), p.date, unit: .day), y: .value(T("Interrupt rate"), p.interruptRate))
                             .foregroundStyle(Viz.accentPurple)
                             .interpolationMethod(.monotone)
                     }
@@ -1167,7 +1167,7 @@ struct PanelView: View {
                         }
                     }
                     .frame(height: 44)
-                    Text("実行中(前のターン継続中)に次を送った割合").font(.system(size: 9)).foregroundStyle(.secondary)
+                    Text(T("share of prompts sent while the previous turn was still running")).font(.system(size: 9)).foregroundStyle(.secondary)
                 }
             }
         }
@@ -1189,7 +1189,7 @@ struct PanelView: View {
                 // SwiftUIのLinkはNSButton系のブリッジで、segmentedピッカーと
                 // 同種のImageRenderer描画不具合を踏む可能性があるため避け、
                 // 自前のtap gestureでNSWorkspace.shared.openを呼ぶ。
-                Text("計算ロジック")
+                Text(T("how it is calculated"))
                     .font(.system(size: 10)).foregroundStyle(.secondary)
                     .underline()
                     .onTapGesture {
@@ -1210,11 +1210,11 @@ struct PanelView: View {
 
             if !anyCLIFound {
                 Card {
-                    SectionLabel(text: "コマンドが見つかりません")
+                    SectionLabel(text: T("Commands not found"))
                     // 依存CLIの一覧はREADMEのinstall行と同じ6本にする。ここが4本
                     // だったので、バナーに従って入れた人は ccattention と
                     // ccsendstats のカードが無言で出ないままになっていた。
-                    Text("cchours・ccusage・ccattention・ccflaky・ccskillstats・ccsendstats のいずれもPATH上に見つかりませんでした。")
+                    Text(T("None of cchours, ccusage, ccattention, ccflaky, ccskillstats or ccsendstats is on PATH."))
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                     Text("npm install -g cchours ccusage ccattention ccflaky ccskillstats ccsendstats")
                         .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
