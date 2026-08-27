@@ -330,7 +330,62 @@ struct MenuBarLabel: View {
         return combined
     }
 
+    // MenuBarExtra のラベルは **テンプレート画像として描かれる** ので、
+    // `.foregroundStyle` で付けた色はメニューバー上で捨てられる。
+    // 実測(2026-08-27): 同じビューを ImageRenderer に通すと彩度のある画素が
+    // 117列あるのに、実機のメニューバーを撮って同じ検査をかけると 0 列。
+    // 色を計算していたのに、その色は一度も表示されていなかった。
+    //
+    // そこで自分で NSImage に焼き、`isTemplate = false` を立てて渡す。
+    // こうするとテンプレート化を通らないので色がそのまま出る。
+    // 返すビューは常に Image ひとつ(トポロジー固定)なので、下に書かれている
+    // NSStatusItem の再描画問題とも衝突しない。
     var body: some View {
+        if let img = rendered() {
+            Image(nsImage: img)
+        } else {
+            content   // 焼けなかったときは従来どおり(色は出ないが数字は出る)
+        }
+    }
+
+    /// テンプレート化を外すと、色は出る代わりに**中立の文字色も自分で決める**
+    /// ことになる。ここを `Color.primary` 任せにすると、アプリの外観(Light)に
+    /// 従って黒で焼かれ、暗いメニューバーの上で沈む(実測でそうなった)。
+    ///
+    /// しかもメニューバーの明暗はアプリの外観と一致しない。macOS は壁紙に
+    /// 合わせてメニューバーを暗くするので、**Light 外観のまま地は暗い**という
+    /// 組み合わせが普通に起きる(実測: AppleInterfaceStyle 未設定=Light、
+    /// 地の色は rgb(68,68,58))。
+    ///
+    /// 判断材料はアプリではなくステータス項目側にある。SwiftUI は
+    /// MenuBarExtra 用のウィンドウを1枚持っていて、その effectiveAppearance が
+    /// メニューバーの明暗を反映する。取れなければアプリの外観に落とす。
+    @MainActor
+    private func menuBarIsDark() -> Bool {
+        let names: [NSAppearance.Name] = [.aqua, .darkAqua, .vibrantLight, .vibrantDark]
+        let statusWindow = NSApp.windows.first { w in
+            let n = String(describing: type(of: w))
+            return n.contains("StatusBar") || n.contains("MenuBarExtra")
+        }
+        let appearance = statusWindow?.effectiveAppearance ?? NSApp.effectiveAppearance
+        let match = appearance.bestMatch(from: names)
+        return match == .darkAqua || match == .vibrantDark
+    }
+
+    @MainActor
+    private func rendered() -> NSImage? {
+        let dark = menuBarIsDark()
+        let r = ImageRenderer(content: content
+            .environment(\.colorScheme, dark ? .dark : .light)
+            .foregroundStyle(dark ? Color.white : Color.black))
+        r.scale = NSScreen.main?.backingScaleFactor ?? 2
+        guard let img = r.nsImage else { return nil }
+        img.isTemplate = false
+        return img
+    }
+
+    @ViewBuilder
+    private var content: some View {
         let hasAlert = snap.claudeStatusIndicator.map { $0 != "none" } ?? false
         HStack(spacing: 4) {
             // 常設のブランドアイコン。数字だけだとメニューバーの他項目に
