@@ -83,15 +83,6 @@ commands; it doesn't touch `~/Applications` or your login items on its own.
   for access it wouldn't otherwise have. Worth knowing before you `git clone`
   and run this against your own account.
 
-## Why a second app instead of just extending ccmenubar
-
-This author has a separate personal build (`ccmenubar-app`, not public) that
-reads cache files a private xbar plugin writes on a schedule specific to one
-machine's setup; it isn't something a stranger's `git clone` would produce
-any data from. ccwatch is the self-contained version of the same idea: same
-visual language, but every number here comes from a command this app ran
-itself, in front of you.
-
 ## Status
 
 Public. Every CLI it depends on is installable from npm, so a `git clone` plus

@@ -1,7 +1,6 @@
-// ccwatch — self-contained Claude Code usage menu bar app. Unlike
-// ccmenubar-app (reads a private xbar plugin's cache), it shells out
-// directly to the public CLIs and Anthropic's oauth/usage endpoint; a
-// missing CLI just omits its card.
+// ccwatch — self-contained Claude Code usage menu bar app. Shells out to the
+// public CLIs and Anthropic's oauth/usage endpoint; a missing CLI just omits
+// its card. No cache, no daemon.
 
 import SwiftUI
 import Foundation
@@ -218,8 +217,7 @@ struct SkillFireKindRow: Identifiable {
     let count: Double
 }
 
-/// Effort you paid — times you had to type per matter (perThread), same
-/// formula as xbar plugin claude-limits.1m.sh.
+/// Effort you paid — times you had to type per matter (perThread).
 struct AttentionPoint: Identifiable {
     let id = UUID()
     let date: Date
@@ -348,7 +346,7 @@ final class Snapshot: ObservableObject {
     private var isRefreshing = false
 
     // Scanning transcripts every 60s tick measured out to 4 node processes
-    // near 100% CPU — these reuse the xbar plugin's production cache
+    // near 100% CPU — these reuse the cache
     // intervals instead: cchours 5min; ccflaky/ccskillstats 900s/3600s.
     private var nextHours = Date.distantPast
     private var nextCost = Date.distantPast
