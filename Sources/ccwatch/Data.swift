@@ -780,7 +780,9 @@ final class Snapshot: ObservableObject {
 
     // Only card with no CLI — stats ~/.claude/projects/<slug>/memory/*.md
     // directly via FileManager, summing mtime+size per category to
-    // reconstruct cumulative tokens by day.
+    // reconstruct cumulative tokens by day. CLAUDE.md and the skills are left
+    // out on purpose: one file's mtime is only its last edit, so a series
+    // cannot be rebuilt from it. Many small files are what make this work.
     private func refreshMemoryGrowth() async {
         let home = NSHomeDirectory()
         let slug = home.replacingOccurrences(of: "/", with: "-")
