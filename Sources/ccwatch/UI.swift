@@ -340,8 +340,14 @@ struct MenuBarLabel: View {
     // こうするとテンプレート化を通らないので色がそのまま出る。
     // 返すビューは常に Image ひとつ(トポロジー固定)なので、下に書かれている
     // NSStatusItem の再描画問題とも衝突しない。
+    /// `--render-preview` はこのビュー自体を ImageRenderer に通す。そこで
+    /// さらに内側で ImageRenderer を回すと入れ子になり、実測で SIGTRAP(exit 133)
+    /// で落ちた — しかも毎回ではなく散発的に。プレビュー側は焼く必要が無い
+    /// (テンプレート化を通らないので色はそのまま出る)ので、素のビューを返す。
+    var bakeToImage: Bool = true
+
     var body: some View {
-        if let img = rendered() {
+        if bakeToImage, let img = rendered() {
             Image(nsImage: img)
         } else {
             content   // 焼けなかったときは従来どおり(色は出ないが数字は出る)
@@ -1302,7 +1308,7 @@ func renderPreviewAndExit(to path: String) -> Never {
             ? String(path.dropLast(4)) + "-menubar.png"
             : path + "-menubar.png"
         writePNG(
-            MenuBarLabel(snap: snap)
+            MenuBarLabel(snap: snap, bakeToImage: false)
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(Color(light: "#fcfcfb", dark: "#1a1a19")),
             to: menubarPath
